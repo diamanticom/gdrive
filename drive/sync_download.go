@@ -3,13 +3,14 @@ package drive
 import (
 	"bytes"
 	"fmt"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 type DownloadSyncArgs struct {
@@ -24,18 +25,18 @@ type DownloadSyncArgs struct {
 	Comparer         FileComparer
 }
 
-func (self *Drive) DownloadSync(args DownloadSyncArgs) error {
-	fmt.Fprintln(args.Out, "Starting sync...")
+func (g *Drive) DownloadSync(args DownloadSyncArgs) error {
+	_, _ = fmt.Fprintln(args.Out, "Starting sync...")
 	started := time.Now()
 
 	// Get remote root dir
-	rootDir, err := self.getSyncRoot(args.RootId)
+	rootDir, err := g.getSyncRoot(args.RootId)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintln(args.Out, "Collecting file information...")
-	files, err := self.prepareSyncFiles(args.Path, rootDir, args.Comparer)
+	_, _ = fmt.Fprintln(args.Out, "Collecting file information...")
+	files, err := g.prepareSyncFiles(args.Path, rootDir, args.Comparer)
 	if err != nil {
 		return err
 	}
@@ -43,7 +44,7 @@ func (self *Drive) DownloadSync(args DownloadSyncArgs) error {
 	// Find changed files
 	changedFiles := files.filterChangedRemoteFiles()
 
-	fmt.Fprintf(args.Out, "Found %d local files and %d remote files\n", len(files.local), len(files.remote))
+	_, _ = fmt.Fprintf(args.Out, "Found %d local files and %d remote files\n", len(files.local), len(files.remote))
 
 	// Ensure that we don't overwrite any local changes
 	if args.Resolution == NoResolution {
@@ -54,61 +55,61 @@ func (self *Drive) DownloadSync(args DownloadSyncArgs) error {
 	}
 
 	// Create missing directories
-	err = self.createMissingLocalDirs(files, args)
+	err = g.createMissingLocalDirs(files, args)
 	if err != nil {
 		return err
 	}
 
 	// Download missing files
-	err = self.downloadMissingFiles(files, args)
+	err = g.downloadMissingFiles(files, args)
 	if err != nil {
 		return err
 	}
 
 	// Download files that has changed
-	err = self.downloadChangedFiles(changedFiles, args)
+	err = g.downloadChangedFiles(changedFiles, args)
 	if err != nil {
 		return err
 	}
 
 	// Delete extraneous local files
 	if args.DeleteExtraneous {
-		err = self.deleteExtraneousLocalFiles(files, args)
+		err = g.deleteExtraneousLocalFiles(files, args)
 		if err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(args.Out, "Sync finished in %s\n", time.Since(started))
+	_, _ = fmt.Fprintf(args.Out, "Sync finished in %s\n", time.Since(started))
 
 	return nil
 }
 
-func (self *Drive) getSyncRoot(rootId string) (*drive.File, error) {
+func (g *Drive) getSyncRoot(rootId string) (*drive.File, error) {
 	fields := []googleapi.Field{"id", "name", "mimeType", "appProperties"}
-	f, err := self.service.Files.Get(rootId).Fields(fields...).Do()
+	f, err := g.service.Files.Get(rootId).Fields(fields...).Do()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to find root dir: %s", err)
+		return nil, fmt.Errorf("failed to find root dir: %s", err)
 	}
 
 	// Ensure file is a directory
 	if !isDir(f) {
-		return nil, fmt.Errorf("Provided root id is not a directory")
+		return nil, fmt.Errorf("provided root id is not a directory")
 	}
 
 	// Ensure directory is a proper syncRoot
 	if _, ok := f.AppProperties["syncRoot"]; !ok {
-		return nil, fmt.Errorf("Provided id is not a sync root directory")
+		return nil, fmt.Errorf("provided id is not a sync root directory")
 	}
 
 	return f, nil
 }
 
-func (self *Drive) createMissingLocalDirs(files *syncFiles, args DownloadSyncArgs) error {
+func (g *Drive) createMissingLocalDirs(files *syncFiles, args DownloadSyncArgs) error {
 	missingDirs := files.filterMissingLocalDirs()
 	missingCount := len(missingDirs)
 
 	if missingCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d local directories are missing\n", missingCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d local directories are missing\n", missingCount)
 	}
 
 	// Sort directories so that the dirs with the shortest path comes first
@@ -117,36 +118,36 @@ func (self *Drive) createMissingLocalDirs(files *syncFiles, args DownloadSyncArg
 	for i, rf := range missingDirs {
 		absPath, err := filepath.Abs(filepath.Join(args.Path, rf.relPath))
 		if err != nil {
-			return fmt.Errorf("Failed to determine local absolute path: %s", err)
+			return fmt.Errorf("failed to determine local absolute path: %s", err)
 		}
-		fmt.Fprintf(args.Out, "[%04d/%04d] Creating directory %s\n", i+1, missingCount, filepath.Join(filepath.Base(args.Path), rf.relPath))
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Creating directory %s\n", i+1, missingCount, filepath.Join(filepath.Base(args.Path), rf.relPath))
 
 		if args.DryRun {
 			continue
 		}
 
-		os.MkdirAll(absPath, 0775)
+		_ = os.MkdirAll(absPath, 0775)
 	}
 
 	return nil
 }
 
-func (self *Drive) downloadMissingFiles(files *syncFiles, args DownloadSyncArgs) error {
+func (g *Drive) downloadMissingFiles(files *syncFiles, args DownloadSyncArgs) error {
 	missingFiles := files.filterMissingLocalFiles()
 	missingCount := len(missingFiles)
 
 	if missingCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d local files are missing\n", missingCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d local files are missing\n", missingCount)
 	}
 
 	for i, rf := range missingFiles {
 		absPath, err := filepath.Abs(filepath.Join(args.Path, rf.relPath))
 		if err != nil {
-			return fmt.Errorf("Failed to determine local absolute path: %s", err)
+			return fmt.Errorf("failed to determine local absolute path: %s", err)
 		}
-		fmt.Fprintf(args.Out, "[%04d/%04d] Downloading %s -> %s\n", i+1, missingCount, rf.relPath, filepath.Join(filepath.Base(args.Path), rf.relPath))
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Downloading %s -> %s\n", i+1, missingCount, rf.relPath, filepath.Join(filepath.Base(args.Path), rf.relPath))
 
-		err = self.downloadRemoteFile(rf.file.Id, absPath, args, 0)
+		err = g.downloadRemoteFile(rf.file.Id, absPath, args, 0)
 		if err != nil {
 			return err
 		}
@@ -155,26 +156,26 @@ func (self *Drive) downloadMissingFiles(files *syncFiles, args DownloadSyncArgs)
 	return nil
 }
 
-func (self *Drive) downloadChangedFiles(changedFiles []*changedFile, args DownloadSyncArgs) error {
+func (g *Drive) downloadChangedFiles(changedFiles []*changedFile, args DownloadSyncArgs) error {
 	changedCount := len(changedFiles)
 
 	if changedCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d remote files has changed\n", changedCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d remote files has changed\n", changedCount)
 	}
 
 	for i, cf := range changedFiles {
 		if skip, reason := checkLocalConflict(cf, args.Resolution); skip {
-			fmt.Fprintf(args.Out, "[%04d/%04d] Skipping %s (%s)\n", i+1, changedCount, cf.remote.relPath, reason)
+			_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Skipping %s (%s)\n", i+1, changedCount, cf.remote.relPath, reason)
 			continue
 		}
 
 		absPath, err := filepath.Abs(filepath.Join(args.Path, cf.remote.relPath))
 		if err != nil {
-			return fmt.Errorf("Failed to determine local absolute path: %s", err)
+			return fmt.Errorf("failed to determine local absolute path: %s", err)
 		}
-		fmt.Fprintf(args.Out, "[%04d/%04d] Downloading %s -> %s\n", i+1, changedCount, cf.remote.relPath, filepath.Join(filepath.Base(args.Path), cf.remote.relPath))
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Downloading %s -> %s\n", i+1, changedCount, cf.remote.relPath, filepath.Join(filepath.Base(args.Path), cf.remote.relPath))
 
-		err = self.downloadRemoteFile(cf.remote.file.Id, absPath, args, 0)
+		err = g.downloadRemoteFile(cf.remote.file.Id, absPath, args, 0)
 		if err != nil {
 			return err
 		}
@@ -183,7 +184,7 @@ func (self *Drive) downloadChangedFiles(changedFiles []*changedFile, args Downlo
 	return nil
 }
 
-func (self *Drive) downloadRemoteFile(id, fpath string, args DownloadSyncArgs, try int) error {
+func (g *Drive) downloadRemoteFile(id, fpath string, args DownloadSyncArgs, try int) error {
 	if args.DryRun {
 		return nil
 	}
@@ -191,16 +192,16 @@ func (self *Drive) downloadRemoteFile(id, fpath string, args DownloadSyncArgs, t
 	// Get timeout reader wrapper and context
 	timeoutReaderWrapper, ctx := getTimeoutReaderWrapperContext(args.Timeout)
 
-	res, err := self.service.Files.Get(id).Context(ctx).Download()
+	res, err := g.service.Files.Get(id).Context(ctx).Download()
 	if err != nil {
 		if isBackendOrRateLimitError(err) && try < MaxErrorRetries {
 			exponentialBackoffSleep(try)
 			try++
-			return self.downloadRemoteFile(id, fpath, args, try)
+			return g.downloadRemoteFile(id, fpath, args, try)
 		} else if isTimeoutError(err) {
-			return fmt.Errorf("Failed to download file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to download file: timeout, no data was transferred for %v", args.Timeout)
 		} else {
-			return fmt.Errorf("Failed to download file: %s", err)
+			return fmt.Errorf("failed to download file: %s", err)
 		}
 	}
 
@@ -224,43 +225,43 @@ func (self *Drive) downloadRemoteFile(id, fpath string, args DownloadSyncArgs, t
 	// Create new file
 	outFile, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("Unable to create local file: %s", err)
+		return fmt.Errorf("unable to create local file: %s", err)
 	}
 
 	// Save file to disk
 	_, err = io.Copy(outFile, reader)
 	if err != nil {
-		outFile.Close()
+		_ = outFile.Close()
 		if try < MaxErrorRetries {
 			exponentialBackoffSleep(try)
 			try++
-			return self.downloadRemoteFile(id, fpath, args, try)
+			return g.downloadRemoteFile(id, fpath, args, try)
 		} else {
-			os.Remove(tmpPath)
-			return fmt.Errorf("Download was interrupted: %s", err)
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("download was interrupted: %s", err)
 		}
 	}
 
 	// Close file
-	outFile.Close()
+	_ = outFile.Close()
 
 	// Rename tmp file to proper filename
 	return os.Rename(tmpPath, fpath)
 }
 
-func (self *Drive) deleteExtraneousLocalFiles(files *syncFiles, args DownloadSyncArgs) error {
+func (g *Drive) deleteExtraneousLocalFiles(files *syncFiles, args DownloadSyncArgs) error {
 	extraneousFiles := files.filterExtraneousLocalFiles()
 	extraneousCount := len(extraneousFiles)
 
 	if extraneousCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d local files are extraneous\n", extraneousCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d local files are extraneous\n", extraneousCount)
 	}
 
 	// Sort files so that the files with the longest path comes first
 	sort.Sort(sort.Reverse(byLocalPathLength(extraneousFiles)))
 
 	for i, lf := range extraneousFiles {
-		fmt.Fprintf(args.Out, "[%04d/%04d] Deleting %s\n", i+1, extraneousCount, lf.absPath)
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Deleting %s\n", i+1, extraneousCount, lf.absPath)
 
 		if args.DryRun {
 			continue
@@ -268,7 +269,7 @@ func (self *Drive) deleteExtraneousLocalFiles(files *syncFiles, args DownloadSyn
 
 		err := os.Remove(lf.absPath)
 		if err != nil {
-			return fmt.Errorf("Failed to delete local file: %s", err)
+			return fmt.Errorf("failed to delete local file: %s", err)
 		}
 	}
 

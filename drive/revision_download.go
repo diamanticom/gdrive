@@ -1,6 +1,7 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,18 +18,19 @@ type DownloadRevisionArgs struct {
 	Force      bool
 	Stdout     bool
 	Timeout    time.Duration
+	JsonOut    bool
 }
 
-func (self *Drive) DownloadRevision(args DownloadRevisionArgs) (err error) {
-	getRev := self.service.Revisions.Get(args.FileId, args.RevisionId)
+func (g *Drive) DownloadRevision(args DownloadRevisionArgs) (err error) {
+	getRev := g.service.Revisions.Get(args.FileId, args.RevisionId)
 
 	rev, err := getRev.Fields("originalFilename").Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get file: %s", err)
+		return fmt.Errorf("failed to get file: %s", err)
 	}
 
 	if rev.OriginalFilename == "" {
-		return fmt.Errorf("Download is not supported for this file type")
+		return fmt.Errorf("download is not supported for this file type")
 	}
 
 	// Get timeout reader wrapper and context
@@ -37,9 +39,9 @@ func (self *Drive) DownloadRevision(args DownloadRevisionArgs) (err error) {
 	res, err := getRev.Context(ctx).Download()
 	if err != nil {
 		if isTimeoutError(err) {
-			return fmt.Errorf("Failed to download file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to download file: timeout, no data was transferred for %v", args.Timeout)
 		}
-		return fmt.Errorf("Failed to download file: %s", err)
+		return fmt.Errorf("failed to download file: %s", err)
 	}
 
 	// Close body on function exit
@@ -54,9 +56,11 @@ func (self *Drive) DownloadRevision(args DownloadRevisionArgs) (err error) {
 	// Path to file
 	fpath := filepath.Join(args.Path, rev.OriginalFilename)
 
-	fmt.Fprintf(out, "Downloading %s -> %s\n", rev.OriginalFilename, fpath)
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(out, "Downloading %s -> %s\n", rev.OriginalFilename, fpath)
+	}
 
-	bytes, rate, err := self.saveFile(saveFileArgs{
+	bytes, rate, err := g.saveFile(saveFileArgs{
 		out:           args.Out,
 		body:          timeoutReaderWrapper(res.Body),
 		contentLength: res.ContentLength,
@@ -70,6 +74,16 @@ func (self *Drive) DownloadRevision(args DownloadRevisionArgs) (err error) {
 		return err
 	}
 
-	fmt.Fprintf(out, "Download complete, rate: %s/s, total size: %s\n", formatSize(rate, false), formatSize(bytes, false))
+	if args.JsonOut {
+		if jb, err := json.Marshal(map[string]string{}); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+		}
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Download complete, rate: %s/s, total size: %s\n",
+		formatSize(rate, false), formatSize(bytes, false))
 	return nil
 }

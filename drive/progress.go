@@ -35,67 +35,67 @@ type Progress struct {
 	done         bool
 }
 
-func (self *Progress) Read(p []byte) (int, error) {
+func (pr *Progress) Read(p []byte) (int, error) {
 	// Read
-	n, err := self.Reader.Read(p)
+	n, err := pr.Reader.Read(p)
 
 	now := time.Now()
 	isLast := err != nil
 
 	// Increment progress
-	newProgress := self.progress + int64(n)
-	self.progress = newProgress
+	newProgress := pr.progress + int64(n)
+	pr.progress = newProgress
 
 	// Initialize rate state
-	if self.rateUpdated.IsZero() {
-		self.rateUpdated = now
-		self.rateProgress = newProgress
+	if pr.rateUpdated.IsZero() {
+		pr.rateUpdated = now
+		pr.rateProgress = newProgress
 	}
 
 	// Update rate every x seconds
-	if self.rateUpdated.Add(MaxRateInterval).Before(now) {
-		self.rate = calcRate(newProgress-self.rateProgress, self.rateUpdated, now)
-		self.rateUpdated = now
-		self.rateProgress = newProgress
+	if pr.rateUpdated.Add(MaxRateInterval).Before(now) {
+		pr.rate = calcRate(newProgress-pr.rateProgress, pr.rateUpdated, now)
+		pr.rateUpdated = now
+		pr.rateProgress = newProgress
 	}
 
 	// Draw progress every x seconds
-	if self.updated.Add(MaxDrawInterval).Before(now) || isLast {
-		self.draw(isLast)
-		self.updated = now
+	if pr.updated.Add(MaxDrawInterval).Before(now) || isLast {
+		pr.draw(isLast)
+		pr.updated = now
 	}
 
 	// Mark as done if error occurs
-	self.done = isLast
+	pr.done = isLast
 
 	return n, err
 }
 
-func (self *Progress) draw(isLast bool) {
-	if self.done {
+func (pr *Progress) draw(isLast bool) {
+	if pr.done {
 		return
 	}
 
-	self.clear()
+	pr.clear()
 
 	// Print progress
-	fmt.Fprintf(self.Writer, "%s", formatSize(self.progress, false))
+	_, _ = fmt.Fprintf(pr.Writer, "%s", formatSize(pr.progress, false))
 
 	// Print total size
-	if self.Size > 0 {
-		fmt.Fprintf(self.Writer, "/%s", formatSize(self.Size, false))
+	if pr.Size > 0 {
+		_, _ = fmt.Fprintf(pr.Writer, "/%s", formatSize(pr.Size, false))
 	}
 
 	// Print rate
-	if self.rate > 0 {
-		fmt.Fprintf(self.Writer, ", Rate: %s/s", formatSize(self.rate, false))
+	if pr.rate > 0 {
+		_, _ = fmt.Fprintf(pr.Writer, ", Rate: %s/s", formatSize(pr.rate, false))
 	}
 
 	if isLast {
-		self.clear()
+		pr.clear()
 	}
 }
 
-func (self *Progress) clear() {
-	fmt.Fprintf(self.Writer, "\r%50s\r", "")
+func (pr *Progress) clear() {
+	_, _ = fmt.Fprintf(pr.Writer, "\r%50s\r", "")
 }

@@ -1,12 +1,14 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"text/tabwriter"
+
 	"golang.org/x/net/context"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/googleapi"
-	"io"
-	"text/tabwriter"
 )
 
 type ListFilesArgs struct {
@@ -18,21 +20,22 @@ type ListFilesArgs struct {
 	SkipHeader  bool
 	SizeInBytes bool
 	AbsPath     bool
+	JsonOut     bool
 }
 
-func (self *Drive) List(args ListFilesArgs) (err error) {
+func (g *Drive) List(args ListFilesArgs) (err error) {
 	listArgs := listAllFilesArgs{
 		query:     args.Query,
 		fields:    []googleapi.Field{"nextPageToken", "files(id,name,md5Checksum,mimeType,size,createdTime,parents)"},
 		sortOrder: args.SortOrder,
 		maxFiles:  args.MaxFiles,
 	}
-	files, err := self.listAllFiles(listArgs)
+	files, err := g.listAllFiles(listArgs)
 	if err != nil {
-		return fmt.Errorf("Failed to list files: %s", err)
+		return fmt.Errorf("failed to list files: %s", err)
 	}
 
-	pathfinder := self.newPathfinder()
+	pathfinder := g.newPathfinder()
 
 	if args.AbsPath {
 		// Replace name with absolute path
@@ -44,13 +47,24 @@ func (self *Drive) List(args ListFilesArgs) (err error) {
 		}
 	}
 
-	PrintFileList(PrintFileListArgs{
+	p := PrintFileListArgs{
 		Out:         args.Out,
 		Files:       files,
 		NameWidth:   int(args.NameWidth),
 		SkipHeader:  args.SkipHeader,
 		SizeInBytes: args.SizeInBytes,
-	})
+	}
+
+	if args.JsonOut {
+		if jb, err := json.Marshal(p); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	}
+
+	PrintFileList(p)
 
 	return
 }
@@ -62,7 +76,7 @@ type listAllFilesArgs struct {
 	maxFiles  int64
 }
 
-func (self *Drive) listAllFiles(args listAllFilesArgs) ([]*drive.File, error) {
+func (g *Drive) listAllFiles(args listAllFilesArgs) ([]*drive.File, error) {
 	var files []*drive.File
 
 	var pageSize int64
@@ -72,9 +86,9 @@ func (self *Drive) listAllFiles(args listAllFilesArgs) ([]*drive.File, error) {
 		pageSize = 1000
 	}
 
-	controlledStop := fmt.Errorf("Controlled stop")
+	controlledStop := fmt.Errorf("controlled stop")
 
-	err := self.service.Files.List().Q(args.query).Fields(args.fields...).OrderBy(args.sortOrder).PageSize(pageSize).Pages(context.TODO(), func(fl *drive.FileList) error {
+	err := g.service.Files.List().Q(args.query).Fields(args.fields...).OrderBy(args.sortOrder).PageSize(pageSize).Pages(context.TODO(), func(fl *drive.FileList) error {
 		files = append(files, fl.Files...)
 
 		// Stop when we have all the files we need
@@ -110,11 +124,11 @@ func PrintFileList(args PrintFileListArgs) {
 	w.Init(args.Out, 0, 0, 3, ' ', 0)
 
 	if !args.SkipHeader {
-		fmt.Fprintln(w, "Id\tName\tType\tSize\tCreated")
+		_, _ = fmt.Fprintln(w, "Id\tName\tType\tSize\tCreated")
 	}
 
 	for _, f := range args.Files {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			f.Id,
 			truncateString(f.Name, args.NameWidth),
 			filetype(f),
@@ -123,7 +137,7 @@ func PrintFileList(args PrintFileListArgs) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func filetype(f *drive.File) string {

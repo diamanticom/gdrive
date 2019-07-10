@@ -2,16 +2,17 @@ package drive
 
 import (
 	"fmt"
-	"github.com/sabhiram/go-git-ignore"
-	"github.com/soniakeys/graph"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	ignore "github.com/sabhiram/go-git-ignore"
+	"github.com/soniakeys/graph"
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 const DefaultIgnoreFile = ".gdriveignore"
@@ -41,7 +42,7 @@ const (
 	KeepLargest
 )
 
-func (self *Drive) prepareSyncFiles(localPath string, root *drive.File, cmp FileComparer) (*syncFiles, error) {
+func (g *Drive) prepareSyncFiles(localPath string, root *drive.File, cmp FileComparer) (*syncFiles, error) {
 	localCh := make(chan struct {
 		files []*LocalFile
 		err   error
@@ -60,7 +61,7 @@ func (self *Drive) prepareSyncFiles(localPath string, root *drive.File, cmp File
 	}()
 
 	go func() {
-		files, err := self.prepareRemoteFiles(root, "")
+		files, err := g.prepareRemoteFiles(root, "")
 		remoteCh <- struct {
 			files []*RemoteFile
 			err   error
@@ -85,10 +86,10 @@ func (self *Drive) prepareSyncFiles(localPath string, root *drive.File, cmp File
 	}, nil
 }
 
-func (self *Drive) isSyncFile(id string) (bool, error) {
-	f, err := self.service.Files.Get(id).Fields("appProperties").Do()
+func (g *Drive) isSyncFile(id string) (bool, error) {
+	f, err := g.service.Files.Get(id).Fields("appProperties").Do()
 	if err != nil {
-		return false, fmt.Errorf("Failed to get file: %s", err)
+		return false, fmt.Errorf("failed to get file: %s", err)
 	}
 
 	_, ok := f.AppProperties["sync"]
@@ -146,22 +147,22 @@ func prepareLocalFiles(root string) ([]*LocalFile, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to prepare local files: %s", err)
+		return nil, fmt.Errorf("failed to prepare local files: %s", err)
 	}
 
 	return files, err
 }
 
-func (self *Drive) prepareRemoteFiles(rootDir *drive.File, sortOrder string) ([]*RemoteFile, error) {
+func (g *Drive) prepareRemoteFiles(rootDir *drive.File, sortOrder string) ([]*RemoteFile, error) {
 	// Find all files which has rootDir as root
 	listArgs := listAllFilesArgs{
 		query:     fmt.Sprintf("appProperties has {key='syncRootId' and value='%s'}", rootDir.Id),
 		fields:    []googleapi.Field{"nextPageToken", "files(id,name,parents,md5Checksum,mimeType,size,modifiedTime)"},
 		sortOrder: sortOrder,
 	}
-	files, err := self.listAllFiles(listArgs)
+	files, err := g.listAllFiles(listArgs)
 	if err != nil {
-		return nil, fmt.Errorf("Failed listing files: %s", err)
+		return nil, fmt.Errorf("failed listing files: %s", err)
 	}
 
 	if err := checkFiles(files); err != nil {
@@ -177,7 +178,7 @@ func (self *Drive) prepareRemoteFiles(rootDir *drive.File, sortOrder string) ([]
 	for _, f := range files {
 		relPath, ok := relPaths[f.Id]
 		if !ok {
-			return nil, fmt.Errorf("File %s does not have a valid parent", f.Id)
+			return nil, fmt.Errorf("file %s does not have a valid parent", f.Id)
 		}
 		remoteFiles = append(remoteFiles, &RemoteFile{
 			relPath: relPath,
@@ -216,7 +217,7 @@ func prepareRemoteRelPaths(root *drive.File, files []*drive.File) (map[string]st
 		// Lookup index of parent
 		parentIdx, found := indexLookup[f.Parents[0]]
 		if !found {
-			return nil, fmt.Errorf("Could not find parent of %s (%s)", f.Id, f.Name)
+			return nil, fmt.Errorf("could not find parent of %s (%s)", f.Id, f.Name)
 		}
 		pathEnds[i] = graph.PathEnd{From: parentIdx}
 	}
@@ -240,7 +241,7 @@ func prepareRemoteRelPaths(root *drive.File, files []*drive.File) (map[string]st
 
 		// This will hold the name of all paths between root and
 		// file (exluding root and including file itself)
-		pathNames := []string{}
+		var pathNames []string
 
 		// Lookup file for each node and grab name
 		for _, n := range nodes {
@@ -264,13 +265,13 @@ func checkFiles(files []*drive.File) error {
 	for _, f := range files {
 		// Ensure all files have exactly one parent
 		if len(f.Parents) != 1 {
-			return fmt.Errorf("File %s does not have exacly one parent", f.Id)
+			return fmt.Errorf("file %s does not have exacly one parent", f.Id)
 		}
 
 		// Ensure that there are no duplicate files
 		uniqKey := f.Name + f.Parents[0]
 		if dupeId, isDupe := uniq[uniqKey]; isDupe {
-			return fmt.Errorf("Found name collision between %s and %s", f.Id, dupeId)
+			return fmt.Errorf("found name collision between %s and %s", f.Id, dupeId)
 		}
 		uniq[uniqKey] = f.Id
 	}
@@ -305,34 +306,34 @@ type FileComparer interface {
 	Changed(*LocalFile, *RemoteFile) bool
 }
 
-func (self LocalFile) AbsPath() string {
-	return self.absPath
+func (loc LocalFile) AbsPath() string {
+	return loc.absPath
 }
 
-func (self LocalFile) Size() int64 {
-	return self.info.Size()
+func (loc LocalFile) Size() int64 {
+	return loc.info.Size()
 }
 
-func (self LocalFile) Modified() time.Time {
-	return self.info.ModTime()
+func (loc LocalFile) Modified() time.Time {
+	return loc.info.ModTime()
 }
 
-func (self RemoteFile) Md5() string {
-	return self.file.Md5Checksum
+func (r RemoteFile) Md5() string {
+	return r.file.Md5Checksum
 }
 
-func (self RemoteFile) Size() int64 {
-	return self.file.Size
+func (r RemoteFile) Size() int64 {
+	return r.file.Size
 }
 
-func (self RemoteFile) Modified() time.Time {
-	t, _ := time.Parse(time.RFC3339, self.file.ModifiedTime)
+func (r RemoteFile) Modified() time.Time {
+	t, _ := time.Parse(time.RFC3339, r.file.ModifiedTime)
 	return t
 }
 
-func (self *changedFile) compareModTime() ModTime {
-	localTime := self.local.Modified()
-	remoteTime := self.remote.Modified()
+func (c *changedFile) compareModTime() ModTime {
+	localTime := c.local.Modified()
+	remoteTime := c.remote.Modified()
 
 	if localTime.After(remoteTime) {
 		return LocalLastModified
@@ -345,9 +346,9 @@ func (self *changedFile) compareModTime() ModTime {
 	return EqualModifiedTime
 }
 
-func (self *changedFile) compareSize() LargestSize {
-	localSize := self.local.Size()
-	remoteSize := self.remote.Size()
+func (c *changedFile) compareSize() LargestSize {
+	localSize := c.local.Size()
+	remoteSize := c.remote.Size()
 
 	if localSize > remoteSize {
 		return LocalLargestSize
@@ -360,11 +361,11 @@ func (self *changedFile) compareSize() LargestSize {
 	return EqualSize
 }
 
-func (self *syncFiles) filterMissingRemoteDirs() []*LocalFile {
+func (s *syncFiles) filterMissingRemoteDirs() []*LocalFile {
 	var files []*LocalFile
 
-	for _, lf := range self.local {
-		if lf.info.IsDir() && !self.existsRemote(lf) {
+	for _, lf := range s.local {
+		if lf.info.IsDir() && !s.existsRemote(lf) {
 			files = append(files, lf)
 		}
 	}
@@ -372,11 +373,11 @@ func (self *syncFiles) filterMissingRemoteDirs() []*LocalFile {
 	return files
 }
 
-func (self *syncFiles) filterMissingLocalDirs() []*RemoteFile {
+func (s *syncFiles) filterMissingLocalDirs() []*RemoteFile {
 	var files []*RemoteFile
 
-	for _, rf := range self.remote {
-		if isDir(rf.file) && !self.existsLocal(rf) {
+	for _, rf := range s.remote {
+		if isDir(rf.file) && !s.existsLocal(rf) {
 			files = append(files, rf)
 		}
 	}
@@ -384,11 +385,11 @@ func (self *syncFiles) filterMissingLocalDirs() []*RemoteFile {
 	return files
 }
 
-func (self *syncFiles) filterMissingRemoteFiles() []*LocalFile {
+func (s *syncFiles) filterMissingRemoteFiles() []*LocalFile {
 	var files []*LocalFile
 
-	for _, lf := range self.local {
-		if !lf.info.IsDir() && !self.existsRemote(lf) {
+	for _, lf := range s.local {
+		if !lf.info.IsDir() && !s.existsRemote(lf) {
 			files = append(files, lf)
 		}
 	}
@@ -396,11 +397,11 @@ func (self *syncFiles) filterMissingRemoteFiles() []*LocalFile {
 	return files
 }
 
-func (self *syncFiles) filterMissingLocalFiles() []*RemoteFile {
+func (s *syncFiles) filterMissingLocalFiles() []*RemoteFile {
 	var files []*RemoteFile
 
-	for _, rf := range self.remote {
-		if !isDir(rf.file) && !self.existsLocal(rf) {
+	for _, rf := range s.remote {
+		if !isDir(rf.file) && !s.existsLocal(rf) {
 			files = append(files, rf)
 		}
 	}
@@ -408,23 +409,23 @@ func (self *syncFiles) filterMissingLocalFiles() []*RemoteFile {
 	return files
 }
 
-func (self *syncFiles) filterChangedLocalFiles() []*changedFile {
+func (s *syncFiles) filterChangedLocalFiles() []*changedFile {
 	var files []*changedFile
 
-	for _, lf := range self.local {
+	for _, lf := range s.local {
 		// Skip directories
 		if lf.info.IsDir() {
 			continue
 		}
 
 		// Skip files that don't exist on drive
-		rf, found := self.findRemoteByPath(lf.relPath)
+		rf, found := s.findRemoteByPath(lf.relPath)
 		if !found {
 			continue
 		}
 
 		// Check if file has changed
-		if self.compare.Changed(lf, rf) {
+		if s.compare.Changed(lf, rf) {
 			files = append(files, &changedFile{
 				local:  lf,
 				remote: rf,
@@ -435,23 +436,23 @@ func (self *syncFiles) filterChangedLocalFiles() []*changedFile {
 	return files
 }
 
-func (self *syncFiles) filterChangedRemoteFiles() []*changedFile {
+func (s *syncFiles) filterChangedRemoteFiles() []*changedFile {
 	var files []*changedFile
 
-	for _, rf := range self.remote {
+	for _, rf := range s.remote {
 		// Skip directories
 		if isDir(rf.file) {
 			continue
 		}
 
 		// Skip local files that don't exist
-		lf, found := self.findLocalByPath(rf.relPath)
+		lf, found := s.findLocalByPath(rf.relPath)
 		if !found {
 			continue
 		}
 
 		// Check if file has changed
-		if self.compare.Changed(lf, rf) {
+		if s.compare.Changed(lf, rf) {
 			files = append(files, &changedFile{
 				local:  lf,
 				remote: rf,
@@ -462,11 +463,11 @@ func (self *syncFiles) filterChangedRemoteFiles() []*changedFile {
 	return files
 }
 
-func (self *syncFiles) filterExtraneousRemoteFiles() []*RemoteFile {
+func (s *syncFiles) filterExtraneousRemoteFiles() []*RemoteFile {
 	var files []*RemoteFile
 
-	for _, rf := range self.remote {
-		if !self.existsLocal(rf) {
+	for _, rf := range s.remote {
+		if !s.existsLocal(rf) {
 			files = append(files, rf)
 		}
 	}
@@ -474,11 +475,11 @@ func (self *syncFiles) filterExtraneousRemoteFiles() []*RemoteFile {
 	return files
 }
 
-func (self *syncFiles) filterExtraneousLocalFiles() []*LocalFile {
+func (s *syncFiles) filterExtraneousLocalFiles() []*LocalFile {
 	var files []*LocalFile
 
-	for _, lf := range self.local {
-		if !self.existsRemote(lf) {
+	for _, lf := range s.local {
+		if !s.existsRemote(lf) {
 			files = append(files, lf)
 		}
 	}
@@ -486,22 +487,22 @@ func (self *syncFiles) filterExtraneousLocalFiles() []*LocalFile {
 	return files
 }
 
-func (self *syncFiles) existsRemote(lf *LocalFile) bool {
-	_, found := self.findRemoteByPath(lf.relPath)
+func (s *syncFiles) existsRemote(lf *LocalFile) bool {
+	_, found := s.findRemoteByPath(lf.relPath)
 	return found
 }
 
-func (self *syncFiles) existsLocal(rf *RemoteFile) bool {
-	_, found := self.findLocalByPath(rf.relPath)
+func (s *syncFiles) existsLocal(rf *RemoteFile) bool {
+	_, found := s.findLocalByPath(rf.relPath)
 	return found
 }
 
-func (self *syncFiles) findRemoteByPath(relPath string) (*RemoteFile, bool) {
+func (s *syncFiles) findRemoteByPath(relPath string) (*RemoteFile, bool) {
 	if relPath == "." {
-		return self.root, true
+		return s.root, true
 	}
 
-	for _, rf := range self.remote {
+	for _, rf := range s.remote {
 		if relPath == rf.relPath {
 			return rf, true
 		}
@@ -510,8 +511,8 @@ func (self *syncFiles) findRemoteByPath(relPath string) (*RemoteFile, bool) {
 	return nil, false
 }
 
-func (self *syncFiles) findLocalByPath(relPath string) (*LocalFile, bool) {
-	for _, lf := range self.local {
+func (s *syncFiles) findLocalByPath(relPath string) (*LocalFile, bool) {
+	for _, lf := range s.local {
 		if relPath == lf.relPath {
 			return lf, true
 		}
@@ -546,44 +547,44 @@ func findRemoteConflicts(files []*changedFile) []*changedFile {
 
 type byLocalPathLength []*LocalFile
 
-func (self byLocalPathLength) Len() int {
-	return len(self)
+func (b byLocalPathLength) Len() int {
+	return len(b)
 }
 
-func (self byLocalPathLength) Swap(i, j int) {
-	self[i], self[j] = self[j], self[i]
+func (b byLocalPathLength) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
 }
 
-func (self byLocalPathLength) Less(i, j int) bool {
-	return pathLength(self[i].relPath) < pathLength(self[j].relPath)
+func (b byLocalPathLength) Less(i, j int) bool {
+	return pathLength(b[i].relPath) < pathLength(b[j].relPath)
 }
 
 type byRemotePathLength []*RemoteFile
 
-func (self byRemotePathLength) Len() int {
-	return len(self)
+func (b byRemotePathLength) Len() int {
+	return len(b)
 }
 
-func (self byRemotePathLength) Swap(i, j int) {
-	self[i], self[j] = self[j], self[i]
+func (b byRemotePathLength) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
 }
 
-func (self byRemotePathLength) Less(i, j int) bool {
-	return pathLength(self[i].relPath) < pathLength(self[j].relPath)
+func (b byRemotePathLength) Less(i, j int) bool {
+	return pathLength(b[i].relPath) < pathLength(b[j].relPath)
 }
 
 type byRemotePath []*RemoteFile
 
-func (self byRemotePath) Len() int {
-	return len(self)
+func (b byRemotePath) Len() int {
+	return len(b)
 }
 
-func (self byRemotePath) Swap(i, j int) {
-	self[i], self[j] = self[j], self[i]
+func (b byRemotePath) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
 }
 
-func (self byRemotePath) Less(i, j int) bool {
-	return strings.ToLower(self[i].relPath) < strings.ToLower(self[j].relPath)
+func (b byRemotePath) Less(i, j int) bool {
+	return strings.ToLower(b[i].relPath) < strings.ToLower(b[j].relPath)
 }
 
 type ignoreFunc func(string) bool
@@ -599,7 +600,7 @@ func prepareIgnorer(path string) (ignoreFunc, error) {
 
 	ignorer, err := ignore.CompileIgnoreFile(path)
 	if err != nil {
-		return acceptAll, fmt.Errorf("Failed to prepare ignorer: %s", err)
+		return acceptAll, fmt.Errorf("failed to prepare ignorer: %s", err)
 	}
 
 	return ignorer.MatchesPath, nil
@@ -609,10 +610,10 @@ func formatConflicts(conflicts []*changedFile, out io.Writer) {
 	w := new(tabwriter.Writer)
 	w.Init(out, 0, 0, 3, ' ', 0)
 
-	fmt.Fprintln(w, "Path\tSize Local\tSize Remote\tModified Local\tModified Remote")
+	_, _ = fmt.Fprintln(w, "Path\tSize Local\tSize Remote\tModified Local\tModified Remote")
 
 	for _, cf := range conflicts {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			truncateString(cf.local.relPath, 60),
 			formatSize(cf.local.Size(), false),
 			formatSize(cf.remote.Size(), false),
@@ -621,5 +622,5 @@ func formatConflicts(conflicts []*changedFile, out io.Writer) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }

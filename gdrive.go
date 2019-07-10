@@ -4,23 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/prasmussen/gdrive/cli"
+	"github.com/gdrive-org/gdrive/utils"
+
+	"github.com/gdrive-org/gdrive/cli"
 )
 
-const Name = "gdrive"
-const Version = "2.1.0"
-
-const DefaultMaxFiles = 30
-const DefaultMaxChanges = 100
-const DefaultNameWidth = 40
-const DefaultPathWidth = 60
-const DefaultUploadChunkSize = 8 * 1024 * 1024
-const DefaultTimeout = 5 * 60
-const DefaultQuery = "trashed = false and 'me' in owners"
-const DefaultShareRole = "reader"
-const DefaultShareType = "anyone"
-
-var DefaultConfigDir = GetDefaultConfigDir()
+var DefaultConfigDir = utils.GetDefaultConfigDir()
 
 func main() {
 	globalFlags := []cli.Flag{
@@ -36,19 +25,27 @@ func main() {
 			Description: "Oauth refresh token used to get access token (for advanced users)",
 		},
 		cli.StringFlag{
-			Name:        "accessToken",
-			Patterns:    []string{"--access-token"},
-			Description: "Oauth access token, only recommended for short-lived requests because of short lifetime (for advanced users)",
+			Name:     "accessToken",
+			Patterns: []string{"--access-token"},
+			Description: "Oauth access token, only recommended for short-lived requests because of short lifetime " +
+				"(for advanced users)",
 		},
 		cli.StringFlag{
-			Name:        "serviceAccount",
-			Patterns:    []string{"--service-account"},
-			Description: "Oauth service account filename, used for server to server communication without user interaction (filename path is relative to config dir)",
+			Name:     "serviceAccount",
+			Patterns: []string{"--service-account"},
+			Description: "Oauth service account filename, used for server to server communication without " +
+				"user interaction (filename path is relative to config dir)",
+		},
+		cli.BoolFlag{
+			Name:        "jsonOut",
+			Patterns:    []string{"-j", "--json"},
+			Description: "Print output in JSON format",
+			OmitValue:   true,
 		},
 	}
 
 	handlers := []*cli.Handler{
-		&cli.Handler{
+		{
 			Pattern:     "[global] list [options]",
 			Description: "List files",
 			Callback:    listHandler,
@@ -58,14 +55,16 @@ func main() {
 					cli.IntFlag{
 						Name:         "maxFiles",
 						Patterns:     []string{"-m", "--max"},
-						Description:  fmt.Sprintf("Max files to list, default: %d", DefaultMaxFiles),
-						DefaultValue: DefaultMaxFiles,
+						Description:  fmt.Sprintf("Max files to list, default: %d", utils.DefaultMaxFiles),
+						DefaultValue: utils.DefaultMaxFiles,
 					},
 					cli.StringFlag{
-						Name:         "query",
-						Patterns:     []string{"-q", "--query"},
-						Description:  fmt.Sprintf(`Default query: "%s". See https://developers.google.com/drive/search-parameters`, DefaultQuery),
-						DefaultValue: DefaultQuery,
+						Name:     "query",
+						Patterns: []string{"-q", "--query"},
+						Description: fmt.Sprintf(
+							`Set env var GDRIVE_ASSET_OWNER or Default query: "%s". See https://developers.google.com/drive/search-parameters`,
+							utils.DefaultQuery),
+						DefaultValue: utils.DefaultQuery,
 					},
 					cli.StringFlag{
 						Name:        "sortOrder",
@@ -73,10 +72,11 @@ func main() {
 						Description: "Sort order. See https://godoc.org/google.golang.org/api/drive/v3#FilesListCall.OrderBy",
 					},
 					cli.IntFlag{
-						Name:         "nameWidth",
-						Patterns:     []string{"--name-width"},
-						Description:  fmt.Sprintf("Width of name column, default: %d, minimum: 9, use 0 for full width", DefaultNameWidth),
-						DefaultValue: DefaultNameWidth,
+						Name:     "nameWidth",
+						Patterns: []string{"--name-width"},
+						Description: fmt.Sprintf("Width of name column, default: %d, minimum: 9, "+
+							"use 0 for full width", utils.DefaultNameWidth),
+						DefaultValue: utils.DefaultNameWidth,
 					},
 					cli.BoolFlag{
 						Name:        "absPath",
@@ -99,7 +99,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] download [options] <fileId>",
 			Description: "Download file or directory",
 			Callback:    downloadHandler,
@@ -148,15 +148,17 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, "+
+							"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] download query [options] <query>",
 			Description: "Download all files and directories matching query",
 			Callback:    downloadQueryHandler,
@@ -195,7 +197,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] upload [options] <path>",
 			Description: "Upload file or directory",
 			Callback:    uploadHandler,
@@ -209,9 +211,10 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.StringSliceFlag{
-						Name:        "parent",
-						Patterns:    []string{"-p", "--parent"},
-						Description: "Parent id, used to upload file to a specific directory, can be specified multiple times to give many parents",
+						Name:     "parent",
+						Patterns: []string{"-p", "--parent"},
+						Description: "Parent id, used to upload file to a specific directory, " +
+							"can be specified multiple times to give many parents",
 					},
 					cli.StringFlag{
 						Name:        "name",
@@ -247,21 +250,24 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, "+
+							"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 					cli.IntFlag{
-						Name:         "chunksize",
-						Patterns:     []string{"--chunksize"},
-						Description:  fmt.Sprintf("Set chunk size in bytes, default: %d", DefaultUploadChunkSize),
-						DefaultValue: DefaultUploadChunkSize,
+						Name:     "chunksize",
+						Patterns: []string{"--chunksize"},
+						Description: fmt.Sprintf("Set chunk size in bytes, default: %d",
+							utils.DefaultUploadChunkSize),
+						DefaultValue: utils.DefaultUploadChunkSize,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] upload - [options] <name>",
 			Description: "Upload file from stdin",
 			Callback:    uploadStdinHandler,
@@ -269,15 +275,17 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 				cli.NewFlagGroup("options",
 					cli.StringSliceFlag{
-						Name:        "parent",
-						Patterns:    []string{"-p", "--parent"},
-						Description: "Parent id, used to upload file to a specific directory, can be specified multiple times to give many parents",
+						Name:     "parent",
+						Patterns: []string{"-p", "--parent"},
+						Description: "Parent id, used to upload file to a specific directory, " +
+							"can be specified multiple times to give many parents",
 					},
 					cli.IntFlag{
-						Name:         "chunksize",
-						Patterns:     []string{"--chunksize"},
-						Description:  fmt.Sprintf("Set chunk size in bytes, default: %d", DefaultUploadChunkSize),
-						DefaultValue: DefaultUploadChunkSize,
+						Name:     "chunksize",
+						Patterns: []string{"--chunksize"},
+						Description: fmt.Sprintf("Set chunk size in bytes, default: %d",
+							utils.DefaultUploadChunkSize),
+						DefaultValue: utils.DefaultUploadChunkSize,
 					},
 					cli.StringFlag{
 						Name:        "description",
@@ -296,10 +304,12 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, "+
+							"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 					cli.BoolFlag{
 						Name:        "noProgress",
@@ -310,7 +320,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] update [options] <fileId> <path>",
 			Description: "Update file, this creates a new revision of the file",
 			Callback:    updateHandler,
@@ -318,9 +328,10 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 				cli.NewFlagGroup("options",
 					cli.StringSliceFlag{
-						Name:        "parent",
-						Patterns:    []string{"-p", "--parent"},
-						Description: "Parent id, used to upload file to a specific directory, can be specified multiple times to give many parents",
+						Name:     "parent",
+						Patterns: []string{"-p", "--parent"},
+						Description: "Parent id, used to upload file to a specific directory, " +
+							"can be specified multiple times to give many parents",
 					},
 					cli.StringFlag{
 						Name:        "name",
@@ -344,21 +355,24 @@ func main() {
 						Description: "Force mime type",
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, default: %d",
+							utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 					cli.IntFlag{
-						Name:         "chunksize",
-						Patterns:     []string{"--chunksize"},
-						Description:  fmt.Sprintf("Set chunk size in bytes, default: %d", DefaultUploadChunkSize),
-						DefaultValue: DefaultUploadChunkSize,
+						Name:     "chunksize",
+						Patterns: []string{"--chunksize"},
+						Description: fmt.Sprintf("Set chunk size in bytes, default: %d",
+							utils.DefaultUploadChunkSize),
+						DefaultValue: utils.DefaultUploadChunkSize,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] info [options] <fileId>",
 			Description: "Show file info",
 			Callback:    infoHandler,
@@ -374,7 +388,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] mkdir [options] <name>",
 			Description: "Create directory",
 			Callback:    mkdirHandler,
@@ -394,7 +408,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] share [options] <fileId>",
 			Description: "Share file or directory",
 			Callback:    shareHandler,
@@ -402,21 +416,24 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 				cli.NewFlagGroup("options",
 					cli.StringFlag{
-						Name:         "role",
-						Patterns:     []string{"--role"},
-						Description:  fmt.Sprintf("Share role: owner/writer/commenter/reader, default: %s", DefaultShareRole),
-						DefaultValue: DefaultShareRole,
+						Name:     "role",
+						Patterns: []string{"--role"},
+						Description: fmt.Sprintf("Share role: owner/writer/commenter/reader, default: %s",
+							utils.DefaultShareRole),
+						DefaultValue: utils.DefaultShareRole,
 					},
 					cli.StringFlag{
-						Name:         "type",
-						Patterns:     []string{"--type"},
-						Description:  fmt.Sprintf("Share type: user/group/domain/anyone, default: %s", DefaultShareType),
-						DefaultValue: DefaultShareType,
+						Name:     "type",
+						Patterns: []string{"--type"},
+						Description: fmt.Sprintf("Share type: user/group/domain/anyone, default: %s",
+							utils.DefaultShareType),
+						DefaultValue: utils.DefaultShareType,
 					},
 					cli.StringFlag{
-						Name:        "email",
-						Patterns:    []string{"--email"},
-						Description: "The email address of the user or group to share the file with. Requires 'user' or 'group' as type",
+						Name:     "email",
+						Patterns: []string{"--email"},
+						Description: "The email address of the user or group to share the file with. " +
+							"Requires 'user' or 'group' as type",
 					},
 					cli.StringFlag{
 						Name:        "domain",
@@ -438,7 +455,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] share list <fileId>",
 			Description: "List files permissions",
 			Callback:    shareListHandler,
@@ -446,7 +463,7 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] share revoke <fileId> <permissionId>",
 			Description: "Revoke permission",
 			Callback:    shareRevokeHandler,
@@ -454,7 +471,7 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] delete [options] <fileId>",
 			Description: "Delete file or directory",
 			Callback:    deleteHandler,
@@ -470,7 +487,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] sync list [options]",
 			Description: "List all syncable directories on drive",
 			Callback:    listSyncHandler,
@@ -486,7 +503,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] sync content [options] <fileId>",
 			Description: "List content of syncable directory",
 			Callback:    listRecursiveSyncHandler,
@@ -499,10 +516,11 @@ func main() {
 						Description: "Sort order. See https://godoc.org/google.golang.org/api/drive/v3#FilesListCall.OrderBy",
 					},
 					cli.IntFlag{
-						Name:         "pathWidth",
-						Patterns:     []string{"--path-width"},
-						Description:  fmt.Sprintf("Width of path column, default: %d, minimum: 9, use 0 for full width", DefaultPathWidth),
-						DefaultValue: DefaultPathWidth,
+						Name:     "pathWidth",
+						Patterns: []string{"--path-width"},
+						Description: fmt.Sprintf("Width of path column, default: %d, minimum: 9, "+
+							"use 0 for full width", utils.DefaultPathWidth),
+						DefaultValue: utils.DefaultPathWidth,
 					},
 					cli.BoolFlag{
 						Name:        "skipHeader",
@@ -519,7 +537,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] sync download [options] <fileId> <path>",
 			Description: "Sync drive directory to local directory",
 			Callback:    downloadSyncHandler,
@@ -563,15 +581,17 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, "+
+							"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] sync upload [options] <path> <fileId>",
 			Description: "Sync local directory to drive",
 			Callback:    uploadSyncHandler,
@@ -615,21 +635,24 @@ func main() {
 						OmitValue:   true,
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. "+
+							"Timeout is reached when no data is transferred in set amount of seconds, "+
+							"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 					cli.IntFlag{
-						Name:         "chunksize",
-						Patterns:     []string{"--chunksize"},
-						Description:  fmt.Sprintf("Set chunk size in bytes, default: %d", DefaultUploadChunkSize),
-						DefaultValue: DefaultUploadChunkSize,
+						Name:     "chunksize",
+						Patterns: []string{"--chunksize"},
+						Description: fmt.Sprintf("Set chunk size in bytes, default: %d",
+							utils.DefaultUploadChunkSize),
+						DefaultValue: utils.DefaultUploadChunkSize,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] changes [options]",
 			Description: "List file changes",
 			Callback:    listChangesHandler,
@@ -639,8 +662,8 @@ func main() {
 					cli.IntFlag{
 						Name:         "maxChanges",
 						Patterns:     []string{"-m", "--max"},
-						Description:  fmt.Sprintf("Max changes to list, default: %d", DefaultMaxChanges),
-						DefaultValue: DefaultMaxChanges,
+						Description:  fmt.Sprintf("Max changes to list, default: %d", utils.DefaultMaxChanges),
+						DefaultValue: utils.DefaultMaxChanges,
 					},
 					cli.StringFlag{
 						Name:         "pageToken",
@@ -657,8 +680,8 @@ func main() {
 					cli.IntFlag{
 						Name:         "nameWidth",
 						Patterns:     []string{"--name-width"},
-						Description:  fmt.Sprintf("Width of name column, default: %d, minimum: 9, use 0 for full width", DefaultNameWidth),
-						DefaultValue: DefaultNameWidth,
+						Description:  fmt.Sprintf("Width of name column, default: %d, minimum: 9, use 0 for full width", utils.DefaultNameWidth),
+						DefaultValue: utils.DefaultNameWidth,
 					},
 					cli.BoolFlag{
 						Name:        "skipHeader",
@@ -669,7 +692,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] revision list [options] <fileId>",
 			Description: "List file revisions",
 			Callback:    listRevisionsHandler,
@@ -677,10 +700,11 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 				cli.NewFlagGroup("options",
 					cli.IntFlag{
-						Name:         "nameWidth",
-						Patterns:     []string{"--name-width"},
-						Description:  fmt.Sprintf("Width of name column, default: %d, minimum: 9, use 0 for full width", DefaultNameWidth),
-						DefaultValue: DefaultNameWidth,
+						Name:     "nameWidth",
+						Patterns: []string{"--name-width"},
+						Description: fmt.Sprintf("Width of name column, default: %d, minimum: 9, "+
+							"use 0 for full width", utils.DefaultNameWidth),
+						DefaultValue: utils.DefaultNameWidth,
 					},
 					cli.BoolFlag{
 						Name:        "skipHeader",
@@ -697,7 +721,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] revision download [options] <fileId> <revId>",
 			Description: "Download revision",
 			Callback:    downloadRevisionHandler,
@@ -728,15 +752,18 @@ func main() {
 						Description: "Download path",
 					},
 					cli.IntFlag{
-						Name:         "timeout",
-						Patterns:     []string{"--timeout"},
-						Description:  fmt.Sprintf("Set timeout in seconds, use 0 for no timeout. Timeout is reached when no data is transferred in set amount of seconds, default: %d", DefaultTimeout),
-						DefaultValue: DefaultTimeout,
+						Name:     "timeout",
+						Patterns: []string{"--timeout"},
+						Description: fmt.Sprintf(
+							"Set timeout in seconds, use 0 for no timeout. "+
+								"Timeout is reached when no data is transferred in set amount of seconds, "+
+								"default: %d", utils.DefaultTimeout),
+						DefaultValue: utils.DefaultTimeout,
 					},
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] revision delete <fileId> <revId>",
 			Description: "Delete file revision",
 			Callback:    deleteRevisionHandler,
@@ -744,7 +771,7 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] import [options] <path>",
 			Description: "Upload and convert file to a google document, see 'about import' for available conversions",
 			Callback:    importHandler,
@@ -752,9 +779,10 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 				cli.NewFlagGroup("options",
 					cli.StringSliceFlag{
-						Name:        "parent",
-						Patterns:    []string{"-p", "--parent"},
-						Description: "Parent id, used to upload file to a specific directory, can be specified multiple times to give many parents",
+						Name:     "parent",
+						Patterns: []string{"-p", "--parent"},
+						Description: "Parent id, used to upload file to a specific directory, " +
+							"can be specified multiple times to give many parents",
 					},
 					cli.BoolFlag{
 						Name:        "noProgress",
@@ -770,7 +798,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] export [options] <fileId>",
 			Description: "Export a google document",
 			Callback:    exportHandler,
@@ -797,7 +825,23 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
+			Pattern:     "[global] spec apply <specFile>",
+			Description: "Apply spec to reconcile local state against remote",
+			Callback:    specApplyHandler,
+			FlagGroups: cli.FlagGroups{
+				cli.NewFlagGroup("global", globalFlags...),
+			},
+		},
+		{
+			Pattern:     "[global] spec gen",
+			Description: "Generate reconciliation spec",
+			Callback:    specGenHandler,
+			FlagGroups: cli.FlagGroups{
+				cli.NewFlagGroup("global", globalFlags...),
+			},
+		},
+		{
 			Pattern:     "[global] about [options]",
 			Description: "Google drive metadata, quota usage",
 			Callback:    aboutHandler,
@@ -813,7 +857,7 @@ func main() {
 				),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] about import",
 			Description: "Show supported import formats",
 			Callback:    aboutImportHandler,
@@ -821,7 +865,7 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "[global] about export",
 			Description: "Show supported export formats",
 			Callback:    aboutExportHandler,
@@ -829,22 +873,22 @@ func main() {
 				cli.NewFlagGroup("global", globalFlags...),
 			},
 		},
-		&cli.Handler{
+		{
 			Pattern:     "version",
 			Description: "Print application version",
 			Callback:    printVersion,
 		},
-		&cli.Handler{
+		{
 			Pattern:     "help",
 			Description: "Print help",
 			Callback:    printHelp,
 		},
-		&cli.Handler{
+		{
 			Pattern:     "help <command>",
 			Description: "Print command help",
 			Callback:    printCommandHelp,
 		},
-		&cli.Handler{
+		{
 			Pattern:     "help <command> <subcommand>",
 			Description: "Print subcommand help",
 			Callback:    printSubCommandHelp,
@@ -854,6 +898,6 @@ func main() {
 	cli.SetHandlers(handlers)
 
 	if ok := cli.Handle(os.Args[1:]); !ok {
-		ExitF("No valid arguments given, use '%s help' to see available commands", Name)
+		utils.ExitF("No valid arguments given, use '%s help' to see available commands", utils.Name)
 	}
 }

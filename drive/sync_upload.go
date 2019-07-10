@@ -3,13 +3,14 @@ package drive
 import (
 	"bytes"
 	"fmt"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 type UploadSyncArgs struct {
@@ -23,24 +24,28 @@ type UploadSyncArgs struct {
 	Timeout          time.Duration
 	Resolution       ConflictResolution
 	Comparer         FileComparer
+	JsonOut          bool
 }
 
-func (self *Drive) UploadSync(args UploadSyncArgs) error {
+func (g *Drive) UploadSync(args UploadSyncArgs) error {
 	if args.ChunkSize > intMax()-1 {
-		return fmt.Errorf("Chunk size is to big, max chunk size for this computer is %d", intMax()-1)
+		return fmt.Errorf("chunk size is to big, max chunk size for this computer is %d", intMax()-1)
 	}
 
-	fmt.Fprintln(args.Out, "Starting sync...")
+	_, _ = fmt.Fprintln(args.Out, "Starting sync...")
 	started := time.Now()
 
 	// Create root directory if it does not exist
-	rootDir, err := self.prepareSyncRoot(args)
+	rootDir, err := g.prepareSyncRoot(args)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintln(args.Out, "Collecting local and remote file information...")
-	files, err := self.prepareSyncFiles(args.Path, rootDir, args.Comparer)
+	if !args.JsonOut {
+		_, _ = fmt.Fprintln(args.Out, "Collecting local and remote file information...")
+	}
+
+	files, err := g.prepareSyncFiles(args.Path, rootDir, args.Comparer)
 	if err != nil {
 		return err
 	}
@@ -49,10 +54,12 @@ func (self *Drive) UploadSync(args UploadSyncArgs) error {
 	changedFiles := files.filterChangedLocalFiles()
 	missingFiles := files.filterMissingRemoteFiles()
 
-	fmt.Fprintf(args.Out, "Found %d local files and %d remote files\n", len(files.local), len(files.remote))
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Found %d local files and %d remote files\n", len(files.local), len(files.remote))
+	}
 
 	// Ensure that there is enough free space on drive
-	if ok, msg := self.checkRemoteFreeSpace(missingFiles, changedFiles); !ok {
+	if ok, msg := g.checkRemoteFreeSpace(missingFiles, changedFiles); !ok {
 		return fmt.Errorf(msg)
 	}
 
@@ -65,45 +72,48 @@ func (self *Drive) UploadSync(args UploadSyncArgs) error {
 	}
 
 	// Create missing directories
-	files, err = self.createMissingRemoteDirs(files, args)
+	files, err = g.createMissingRemoteDirs(files, args)
 	if err != nil {
 		return err
 	}
 
 	// Upload missing files
-	err = self.uploadMissingFiles(missingFiles, files, args)
+	err = g.uploadMissingFiles(missingFiles, files, args)
 	if err != nil {
 		return err
 	}
 
 	// Update modified files
-	err = self.updateChangedFiles(changedFiles, rootDir, args)
+	err = g.updateChangedFiles(changedFiles, rootDir, args)
 	if err != nil {
 		return err
 	}
 
 	// Delete extraneous files on drive
 	if args.DeleteExtraneous {
-		err = self.deleteExtraneousRemoteFiles(files, args)
+		err = g.deleteExtraneousRemoteFiles(files, args)
 		if err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(args.Out, "Sync finished in %s\n", time.Since(started))
+
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Sync finished in %s\n", time.Since(started))
+	}
 
 	return nil
 }
 
-func (self *Drive) prepareSyncRoot(args UploadSyncArgs) (*drive.File, error) {
+func (g *Drive) prepareSyncRoot(args UploadSyncArgs) (*drive.File, error) {
 	fields := []googleapi.Field{"id", "name", "mimeType", "appProperties"}
-	f, err := self.service.Files.Get(args.RootId).Fields(fields...).Do()
+	f, err := g.service.Files.Get(args.RootId).Fields(fields...).Do()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to find root dir: %s", err)
+		return nil, fmt.Errorf("failed to find root dir: %s", err)
 	}
 
 	// Ensure file is a directory
 	if !isDir(f) {
-		return nil, fmt.Errorf("Provided root id is not a directory")
+		return nil, fmt.Errorf("provided root id is not a directory")
 	}
 
 	// Return directory if syncRoot property is already set
@@ -113,14 +123,14 @@ func (self *Drive) prepareSyncRoot(args UploadSyncArgs) (*drive.File, error) {
 
 	// This is the first time this directory have been used for sync
 	// Check if the directory is empty
-	isEmpty, err := self.dirIsEmpty(f.Id)
+	isEmpty, err := g.dirIsEmpty(f.Id)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to check if root dir is empty: %s", err)
+		return nil, fmt.Errorf("failed to check if root dir is empty: %s", err)
 	}
 
 	// Ensure that the directory is empty
 	if !isEmpty {
-		return nil, fmt.Errorf("Root directory is not empty, the initial sync requires an empty directory")
+		return nil, fmt.Errorf("root directory is not empty, the initial sync requires an empty directory")
 	}
 
 	// Update directory with syncRoot property
@@ -128,20 +138,20 @@ func (self *Drive) prepareSyncRoot(args UploadSyncArgs) (*drive.File, error) {
 		AppProperties: map[string]string{"sync": "true", "syncRoot": "true"},
 	}
 
-	f, err = self.service.Files.Update(f.Id, dstFile).Fields(fields...).Do()
+	f, err = g.service.Files.Update(f.Id, dstFile).Fields(fields...).Do()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to update root directory: %s", err)
+		return nil, fmt.Errorf("failed to update root directory: %s", err)
 	}
 
 	return f, nil
 }
 
-func (self *Drive) createMissingRemoteDirs(files *syncFiles, args UploadSyncArgs) (*syncFiles, error) {
+func (g *Drive) createMissingRemoteDirs(files *syncFiles, args UploadSyncArgs) (*syncFiles, error) {
 	missingDirs := files.filterMissingRemoteDirs()
 	missingCount := len(missingDirs)
 
-	if missingCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d remote directories are missing\n", missingCount)
+	if missingCount > 0 && !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "\n%d remote directories are missing\n", missingCount)
 	}
 
 	// Sort directories so that the dirs with the shortest path comes first
@@ -151,12 +161,15 @@ func (self *Drive) createMissingRemoteDirs(files *syncFiles, args UploadSyncArgs
 		parentPath := parentFilePath(lf.relPath)
 		parent, ok := files.findRemoteByPath(parentPath)
 		if !ok {
-			return nil, fmt.Errorf("Could not find remote directory with path '%s'", parentPath)
+			return nil, fmt.Errorf("could not find remote directory with path '%s'", parentPath)
 		}
 
-		fmt.Fprintf(args.Out, "[%04d/%04d] Creating directory %s\n", i+1, missingCount, filepath.Join(files.root.file.Name, lf.relPath))
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Creating directory %s\n",
+				i+1, missingCount, filepath.Join(files.root.file.Name, lf.relPath))
+		}
 
-		f, err := self.createMissingRemoteDir(createMissingRemoteDirArgs{
+		f, err := g.createMissingRemoteDir(createMissingRemoteDirArgs{
 			name:     lf.info.Name(),
 			parentId: parent.file.Id,
 			rootId:   args.RootId,
@@ -184,23 +197,27 @@ type createMissingRemoteDirArgs struct {
 	try      int
 }
 
-func (self *Drive) uploadMissingFiles(missingFiles []*LocalFile, files *syncFiles, args UploadSyncArgs) error {
+func (g *Drive) uploadMissingFiles(missingFiles []*LocalFile, files *syncFiles, args UploadSyncArgs) error {
 	missingCount := len(missingFiles)
 
 	if missingCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d remote files are missing\n", missingCount)
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "\n%d remote files are missing\n", missingCount)
+		}
 	}
 
 	for i, lf := range missingFiles {
 		parentPath := parentFilePath(lf.relPath)
 		parent, ok := files.findRemoteByPath(parentPath)
 		if !ok {
-			return fmt.Errorf("Could not find remote directory with path '%s'", parentPath)
+			return fmt.Errorf("could not find remote directory with path '%s'", parentPath)
 		}
 
-		fmt.Fprintf(args.Out, "[%04d/%04d] Uploading %s -> %s\n", i+1, missingCount, lf.relPath, filepath.Join(files.root.file.Name, lf.relPath))
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Uploading %s -> %s\n", i+1, missingCount, lf.relPath, filepath.Join(files.root.file.Name, lf.relPath))
+		}
 
-		err := self.uploadMissingFile(parent.file.Id, lf, args, 0)
+		err := g.uploadMissingFile(parent.file.Id, lf, args, 0)
 		if err != nil {
 			return err
 		}
@@ -209,22 +226,22 @@ func (self *Drive) uploadMissingFiles(missingFiles []*LocalFile, files *syncFile
 	return nil
 }
 
-func (self *Drive) updateChangedFiles(changedFiles []*changedFile, root *drive.File, args UploadSyncArgs) error {
+func (g *Drive) updateChangedFiles(changedFiles []*changedFile, root *drive.File, args UploadSyncArgs) error {
 	changedCount := len(changedFiles)
 
 	if changedCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d local files has changed\n", changedCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d local files has changed\n", changedCount)
 	}
 
 	for i, cf := range changedFiles {
 		if skip, reason := checkRemoteConflict(cf, args.Resolution); skip {
-			fmt.Fprintf(args.Out, "[%04d/%04d] Skipping %s (%s)\n", i+1, changedCount, cf.local.relPath, reason)
+			_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Skipping %s (%s)\n", i+1, changedCount, cf.local.relPath, reason)
 			continue
 		}
 
-		fmt.Fprintf(args.Out, "[%04d/%04d] Updating %s -> %s\n", i+1, changedCount, cf.local.relPath, filepath.Join(root.Name, cf.local.relPath))
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Updating %s -> %s\n", i+1, changedCount, cf.local.relPath, filepath.Join(root.Name, cf.local.relPath))
 
-		err := self.updateChangedFile(cf, args, 0)
+		err := g.updateChangedFile(cf, args, 0)
 		if err != nil {
 			return err
 		}
@@ -233,21 +250,21 @@ func (self *Drive) updateChangedFiles(changedFiles []*changedFile, root *drive.F
 	return nil
 }
 
-func (self *Drive) deleteExtraneousRemoteFiles(files *syncFiles, args UploadSyncArgs) error {
+func (g *Drive) deleteExtraneousRemoteFiles(files *syncFiles, args UploadSyncArgs) error {
 	extraneousFiles := files.filterExtraneousRemoteFiles()
 	extraneousCount := len(extraneousFiles)
 
 	if extraneousCount > 0 {
-		fmt.Fprintf(args.Out, "\n%d remote files are extraneous\n", extraneousCount)
+		_, _ = fmt.Fprintf(args.Out, "\n%d remote files are extraneous\n", extraneousCount)
 	}
 
 	// Sort files so that the files with the longest path comes first
 	sort.Sort(sort.Reverse(byRemotePathLength(extraneousFiles)))
 
 	for i, rf := range extraneousFiles {
-		fmt.Fprintf(args.Out, "[%04d/%04d] Deleting %s\n", i+1, extraneousCount, filepath.Join(files.root.file.Name, rf.relPath))
+		_, _ = fmt.Fprintf(args.Out, "[%04d/%04d] Deleting %s\n", i+1, extraneousCount, filepath.Join(files.root.file.Name, rf.relPath))
 
-		err := self.deleteRemoteFile(rf, args, 0)
+		err := g.deleteRemoteFile(rf, args, 0)
 		if err != nil {
 			return err
 		}
@@ -256,7 +273,7 @@ func (self *Drive) deleteExtraneousRemoteFiles(files *syncFiles, args UploadSync
 	return nil
 }
 
-func (self *Drive) createMissingRemoteDir(args createMissingRemoteDirArgs) (*drive.File, error) {
+func (g *Drive) createMissingRemoteDir(args createMissingRemoteDirArgs) (*drive.File, error) {
 	dstFile := &drive.File{
 		Name:          args.name,
 		MimeType:      DirectoryMimeType,
@@ -268,28 +285,28 @@ func (self *Drive) createMissingRemoteDir(args createMissingRemoteDirArgs) (*dri
 		return dstFile, nil
 	}
 
-	f, err := self.service.Files.Create(dstFile).Do()
+	f, err := g.service.Files.Create(dstFile).Do()
 	if err != nil {
 		if isBackendOrRateLimitError(err) && args.try < MaxErrorRetries {
 			exponentialBackoffSleep(args.try)
 			args.try++
-			return self.createMissingRemoteDir(args)
+			return g.createMissingRemoteDir(args)
 		} else {
-			return nil, fmt.Errorf("Failed to create directory: %s", err)
+			return nil, fmt.Errorf("failed to create directory: %s", err)
 		}
 	}
 
 	return f, nil
 }
 
-func (self *Drive) uploadMissingFile(parentId string, lf *LocalFile, args UploadSyncArgs, try int) error {
+func (g *Drive) uploadMissingFile(parentId string, lf *LocalFile, args UploadSyncArgs, try int) error {
 	if args.DryRun {
 		return nil
 	}
 
 	srcFile, err := os.Open(lf.absPath)
 	if err != nil {
-		return fmt.Errorf("Failed to open file: %s", err)
+		return fmt.Errorf("failed to open file: %s", err)
 	}
 
 	// Close file on function exit
@@ -311,30 +328,30 @@ func (self *Drive) uploadMissingFile(parentId string, lf *LocalFile, args Upload
 	// Wrap reader in timeout reader
 	reader, ctx := getTimeoutReaderContext(progressReader, args.Timeout)
 
-	_, err = self.service.Files.Create(dstFile).Fields("id", "name", "size", "md5Checksum").Context(ctx).Media(reader, chunkSize).Do()
+	_, err = g.service.Files.Create(dstFile).Fields("id", "name", "size", "md5Checksum").Context(ctx).Media(reader, chunkSize).Do()
 	if err != nil {
 		if isBackendOrRateLimitError(err) && try < MaxErrorRetries {
 			exponentialBackoffSleep(try)
 			try++
-			return self.uploadMissingFile(parentId, lf, args, try)
+			return g.uploadMissingFile(parentId, lf, args, try)
 		} else if isTimeoutError(err) {
-			return fmt.Errorf("Failed to upload file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to upload file: timeout, no data was transferred for %v", args.Timeout)
 		} else {
-			return fmt.Errorf("Failed to upload file: %s", err)
+			return fmt.Errorf("failed to upload file: %s", err)
 		}
 	}
 
 	return nil
 }
 
-func (self *Drive) updateChangedFile(cf *changedFile, args UploadSyncArgs, try int) error {
+func (g *Drive) updateChangedFile(cf *changedFile, args UploadSyncArgs, try int) error {
 	if args.DryRun {
 		return nil
 	}
 
 	srcFile, err := os.Open(cf.local.absPath)
 	if err != nil {
-		return fmt.Errorf("Failed to open file: %s", err)
+		return fmt.Errorf("failed to open file: %s", err)
 	}
 
 	// Close file on function exit
@@ -352,46 +369,46 @@ func (self *Drive) updateChangedFile(cf *changedFile, args UploadSyncArgs, try i
 	// Wrap reader in timeout reader
 	reader, ctx := getTimeoutReaderContext(progressReader, args.Timeout)
 
-	_, err = self.service.Files.Update(cf.remote.file.Id, dstFile).Context(ctx).Media(reader, chunkSize).Do()
+	_, err = g.service.Files.Update(cf.remote.file.Id, dstFile).Context(ctx).Media(reader, chunkSize).Do()
 	if err != nil {
 		if isBackendOrRateLimitError(err) && try < MaxErrorRetries {
 			exponentialBackoffSleep(try)
 			try++
-			return self.updateChangedFile(cf, args, try)
+			return g.updateChangedFile(cf, args, try)
 		} else if isTimeoutError(err) {
-			return fmt.Errorf("Failed to upload file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to upload file: timeout, no data was transferred for %v", args.Timeout)
 		} else {
-			return fmt.Errorf("Failed to update file: %s", err)
+			return fmt.Errorf("failed to update file: %s", err)
 		}
 	}
 
 	return nil
 }
 
-func (self *Drive) deleteRemoteFile(rf *RemoteFile, args UploadSyncArgs, try int) error {
+func (g *Drive) deleteRemoteFile(rf *RemoteFile, args UploadSyncArgs, try int) error {
 	if args.DryRun {
 		return nil
 	}
 
-	err := self.service.Files.Delete(rf.file.Id).Do()
+	err := g.service.Files.Delete(rf.file.Id).Do()
 	if err != nil {
 		if isBackendOrRateLimitError(err) && try < MaxErrorRetries {
 			exponentialBackoffSleep(try)
 			try++
-			return self.deleteRemoteFile(rf, args, try)
+			return g.deleteRemoteFile(rf, args, try)
 		} else {
-			return fmt.Errorf("Failed to delete file: %s", err)
+			return fmt.Errorf("failed to delete file: %s", err)
 		}
 	}
 
 	return nil
 }
 
-func (self *Drive) dirIsEmpty(id string) (bool, error) {
+func (g *Drive) dirIsEmpty(id string) (bool, error) {
 	query := fmt.Sprintf("'%s' in parents", id)
-	fileList, err := self.service.Files.List().Q(query).Do()
+	fileList, err := g.service.Files.List().Q(query).Do()
 	if err != nil {
-		return false, fmt.Errorf("Empty dir check failed: ", err)
+		return false, fmt.Errorf("empty dir check failed:%v", err)
 	}
 
 	return len(fileList.Files) == 0, nil
@@ -449,8 +466,8 @@ func ensureNoRemoteModifications(files []*changedFile) error {
 	return fmt.Errorf(buffer.String())
 }
 
-func (self *Drive) checkRemoteFreeSpace(missingFiles []*LocalFile, changedFiles []*changedFile) (bool, string) {
-	about, err := self.service.About.Get().Fields("storageQuota").Do()
+func (g *Drive) checkRemoteFreeSpace(missingFiles []*LocalFile, changedFiles []*changedFile) (bool, string) {
+	about, err := g.service.About.Get().Fields("storageQuota").Do()
 	if err != nil {
 		return false, fmt.Sprintf("Failed to determine free space: %s", err)
 	}

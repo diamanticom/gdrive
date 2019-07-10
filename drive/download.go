@@ -1,6 +1,7 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,16 +23,17 @@ type DownloadArgs struct {
 	Delete    bool
 	Stdout    bool
 	Timeout   time.Duration
+	JsonOut   bool
 }
 
-func (self *Drive) Download(args DownloadArgs) error {
+func (g *Drive) Download(args DownloadArgs) error {
 	if args.Recursive {
-		return self.downloadRecursive(args)
+		return g.downloadRecursive(args)
 	}
 
-	f, err := self.service.Files.Get(args.Id).Fields("id", "name", "size", "mimeType", "md5Checksum").Do()
+	f, err := g.service.Files.Get(args.Id).Fields("id", "name", "size", "mimeType", "md5Checksum").Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get file: %s", err)
+		return fmt.Errorf("failed to get file: %s", err)
 	}
 
 	if isDir(f) {
@@ -42,25 +44,51 @@ func (self *Drive) Download(args DownloadArgs) error {
 		return fmt.Errorf("'%s' is a google document and must be exported, see the export command", f.Name)
 	}
 
-	bytes, rate, err := self.downloadBinary(f, args)
+	bytes, rate, err := g.downloadBinary(f, args)
 	if err != nil {
 		return err
 	}
 
+	out := make(map[string]string)
+
 	if !args.Stdout {
-		fmt.Fprintf(args.Out, "Downloaded %s at %s/s, total %s\n", f.Id, formatSize(rate, false), formatSize(bytes, false))
+		mesg := fmt.Sprintf("Downloaded %s at %s/s, total %s\n",
+			f.Id,
+			formatSize(rate, false),
+			formatSize(bytes, false))
+
+		out["id"] = f.Id
+		out["rate"] = formatSize(rate, false)
+		out["size"] = formatSize(bytes, false)
+
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, mesg)
+		}
 	}
 
 	if args.Delete {
-		err = self.deleteFile(args.Id)
+		err = g.deleteFile(args.Id)
 		if err != nil {
-			return fmt.Errorf("Failed to delete file: %s", err)
+			return fmt.Errorf("failed to delete file: %s", err)
 		}
 
 		if !args.Stdout {
-			fmt.Fprintf(args.Out, "Removed %s\n", args.Id)
+			out["removed"] = args.Id
+			if !args.JsonOut {
+				_, _ = fmt.Fprintf(args.Out, "Removed %s\n", args.Id)
+			}
 		}
 	}
+
+	if !args.Stdout && args.JsonOut {
+		if jb, err := json.Marshal(out); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	}
+
 	return err
 }
 
@@ -72,16 +100,17 @@ type DownloadQueryArgs struct {
 	Force     bool
 	Skip      bool
 	Recursive bool
+	JsonOut   bool
 }
 
-func (self *Drive) DownloadQuery(args DownloadQueryArgs) error {
+func (g *Drive) DownloadQuery(args DownloadQueryArgs) error {
 	listArgs := listAllFilesArgs{
 		query:  args.Query,
 		fields: []googleapi.Field{"nextPageToken", "files(id,name,mimeType,size,md5Checksum)"},
 	}
-	files, err := self.listAllFiles(listArgs)
+	files, err := g.listAllFiles(listArgs)
 	if err != nil {
-		return fmt.Errorf("Failed to list files: %s", err)
+		return fmt.Errorf("failed to list files: %s", err)
 	}
 
 	downloadArgs := DownloadArgs{
@@ -90,13 +119,14 @@ func (self *Drive) DownloadQuery(args DownloadQueryArgs) error {
 		Path:     args.Path,
 		Force:    args.Force,
 		Skip:     args.Skip,
+		JsonOut:  args.JsonOut,
 	}
 
 	for _, f := range files {
 		if isDir(f) && args.Recursive {
-			err = self.downloadDirectory(f, downloadArgs)
+			err = g.downloadDirectory(f, downloadArgs)
 		} else if isBinary(f) {
-			_, _, err = self.downloadBinary(f, downloadArgs)
+			_, _, err = g.downloadBinary(f, downloadArgs)
 		}
 
 		if err != nil {
@@ -107,32 +137,32 @@ func (self *Drive) DownloadQuery(args DownloadQueryArgs) error {
 	return nil
 }
 
-func (self *Drive) downloadRecursive(args DownloadArgs) error {
-	f, err := self.service.Files.Get(args.Id).Fields("id", "name", "size", "mimeType", "md5Checksum").Do()
+func (g *Drive) downloadRecursive(args DownloadArgs) error {
+	f, err := g.service.Files.Get(args.Id).Fields("id", "name", "size", "mimeType", "md5Checksum").Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get file: %s", err)
+		return fmt.Errorf("failed to get file: %s", err)
 	}
 
 	if isDir(f) {
-		return self.downloadDirectory(f, args)
+		return g.downloadDirectory(f, args)
 	} else if isBinary(f) {
-		_, _, err = self.downloadBinary(f, args)
+		_, _, err = g.downloadBinary(f, args)
 		return err
 	}
 
 	return nil
 }
 
-func (self *Drive) downloadBinary(f *drive.File, args DownloadArgs) (int64, int64, error) {
+func (g *Drive) downloadBinary(f *drive.File, args DownloadArgs) (int64, int64, error) {
 	// Get timeout reader wrapper and context
 	timeoutReaderWrapper, ctx := getTimeoutReaderWrapperContext(args.Timeout)
 
-	res, err := self.service.Files.Get(f.Id).Context(ctx).Download()
+	res, err := g.service.Files.Get(f.Id).Context(ctx).Download()
 	if err != nil {
 		if isTimeoutError(err) {
-			return 0, 0, fmt.Errorf("Failed to download file: timeout, no data was transferred for %v", args.Timeout)
+			return 0, 0, fmt.Errorf("failed to download file: timeout, no data was transferred for %v", args.Timeout)
 		}
-		return 0, 0, fmt.Errorf("Failed to download file: %s", err)
+		return 0, 0, fmt.Errorf("failed to download file: %s", err)
 	}
 
 	// Close body on function exit
@@ -141,11 +171,11 @@ func (self *Drive) downloadBinary(f *drive.File, args DownloadArgs) (int64, int6
 	// Path to file
 	fpath := filepath.Join(args.Path, f.Name)
 
-	if !args.Stdout {
-		fmt.Fprintf(args.Out, "Downloading %s -> %s\n", f.Name, fpath)
+	if !args.Stdout && !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Downloading %s -> %s\n", f.Name, fpath)
 	}
 
-	return self.saveFile(saveFileArgs{
+	return g.saveFile(saveFileArgs{
 		out:           args.Out,
 		body:          timeoutReaderWrapper(res.Body),
 		contentLength: res.ContentLength,
@@ -168,7 +198,7 @@ type saveFileArgs struct {
 	progress      io.Writer
 }
 
-func (self *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
+func (g *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
 	// Wrap response body in progress reader
 	srcReader := getProgressReader(args.body, args.progress, args.contentLength)
 
@@ -180,7 +210,7 @@ func (self *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
 
 	// Check if file exists to force
 	if !args.skip && !args.force && fileExists(args.fpath) {
-		return 0, 0, fmt.Errorf("File '%s' already exists, use --force to overwrite or --skip to skip", args.fpath)
+		return 0, 0, fmt.Errorf("file '%s' already exists, use --force to overwrite or --skip to skip", args.fpath)
 	}
 
 	//Check if file exists to skip
@@ -200,7 +230,7 @@ func (self *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
 	// Create new file
 	outFile, err := os.Create(tmpPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("Unable to create new file: %s", err)
+		return 0, 0, fmt.Errorf("unable to create new file: %s", err)
 	}
 
 	started := time.Now()
@@ -208,9 +238,9 @@ func (self *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
 	// Save file to disk
 	bytes, err := io.Copy(outFile, srcReader)
 	if err != nil {
-		outFile.Close()
-		os.Remove(tmpPath)
-		return 0, 0, fmt.Errorf("Failed saving file: %s", err)
+		_ = outFile.Close()
+		_ = os.Remove(tmpPath)
+		return 0, 0, fmt.Errorf("failed saving file: %s", err)
 	}
 
 	// Calculate average download rate
@@ -223,14 +253,14 @@ func (self *Drive) saveFile(args saveFileArgs) (int64, int64, error) {
 	return bytes, rate, os.Rename(tmpPath, args.fpath)
 }
 
-func (self *Drive) downloadDirectory(parent *drive.File, args DownloadArgs) error {
+func (g *Drive) downloadDirectory(parent *drive.File, args DownloadArgs) error {
 	listArgs := listAllFilesArgs{
 		query:  fmt.Sprintf("'%s' in parents", parent.Id),
 		fields: []googleapi.Field{"nextPageToken", "files(id,name)"},
 	}
-	files, err := self.listAllFiles(listArgs)
+	files, err := g.listAllFiles(listArgs)
 	if err != nil {
-		return fmt.Errorf("Failed listing files: %s", err)
+		return fmt.Errorf("failed listing files: %s", err)
 	}
 
 	newPath := filepath.Join(args.Path, parent.Name)
@@ -242,7 +272,7 @@ func (self *Drive) downloadDirectory(parent *drive.File, args DownloadArgs) erro
 		newArgs.Id = f.Id
 		newArgs.Stdout = false
 
-		err = self.downloadRecursive(newArgs)
+		err = g.downloadRecursive(newArgs)
 		if err != nil {
 			return err
 		}

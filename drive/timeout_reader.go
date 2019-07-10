@@ -1,10 +1,11 @@
 package drive
 
 import (
-	"golang.org/x/net/context"
 	"io"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 const TimeoutTimerInterval = time.Second * 10
@@ -54,60 +55,60 @@ type TimeoutReader struct {
 	done           bool
 }
 
-func (self *TimeoutReader) Read(p []byte) (int, error) {
-	if self.timer == nil {
-		self.startTimer()
+func (t *TimeoutReader) Read(p []byte) (int, error) {
+	if t.timer == nil {
+		t.startTimer()
 	}
 
-	self.mutex.Lock()
+	t.mutex.Lock()
 
 	// Read
-	n, err := self.reader.Read(p)
+	n, err := t.reader.Read(p)
 
-	self.lastActivity = time.Now()
-	self.done = (err != nil)
+	t.lastActivity = time.Now()
+	t.done = err != nil
 
-	self.mutex.Unlock()
+	t.mutex.Unlock()
 
-	if self.done {
-		self.stopTimer()
+	if t.done {
+		t.stopTimer()
 	}
 
 	return n, err
 }
 
-func (self *TimeoutReader) startTimer() {
-	self.mutex.Lock()
-	defer self.mutex.Unlock()
+func (t *TimeoutReader) startTimer() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 
-	if !self.done {
-		self.timer = time.AfterFunc(TimeoutTimerInterval, self.timeout)
+	if !t.done {
+		t.timer = time.AfterFunc(TimeoutTimerInterval, t.timeout)
 	}
 }
 
-func (self *TimeoutReader) stopTimer() {
-	self.mutex.Lock()
-	defer self.mutex.Unlock()
+func (t *TimeoutReader) stopTimer() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 
-	if self.timer != nil {
-		self.timer.Stop()
+	if t.timer != nil {
+		t.timer.Stop()
 	}
 }
 
-func (self *TimeoutReader) timeout() {
-	self.mutex.Lock()
+func (t *TimeoutReader) timeout() {
+	t.mutex.Lock()
 
-	if self.done {
-		self.mutex.Unlock()
+	if t.done {
+		t.mutex.Unlock()
 		return
 	}
 
-	if time.Since(self.lastActivity) > self.maxIdleTimeout {
-		self.cancel()
-		self.mutex.Unlock()
+	if time.Since(t.lastActivity) > t.maxIdleTimeout {
+		t.cancel()
+		t.mutex.Unlock()
 		return
 	}
 
-	self.mutex.Unlock()
-	self.startTimer()
+	t.mutex.Unlock()
+	t.startTimer()
 }

@@ -1,10 +1,12 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
-	"google.golang.org/api/drive/v3"
 	"io"
 	"text/tabwriter"
+
+	"google.golang.org/api/drive/v3"
 )
 
 type ListRevisionsArgs struct {
@@ -13,23 +15,35 @@ type ListRevisionsArgs struct {
 	NameWidth   int64
 	SkipHeader  bool
 	SizeInBytes bool
+	JsonOut     bool
 }
 
-func (self *Drive) ListRevisions(args ListRevisionsArgs) (err error) {
-	revList, err := self.service.Revisions.List(args.Id).Fields("revisions(id,keepForever,size,modifiedTime,originalFilename)").Do()
+func (g *Drive) ListRevisions(args ListRevisionsArgs) error {
+	revList, err := g.service.Revisions.List(args.Id).Fields("revisions(id,keepForever,size,modifiedTime,originalFilename)").Do()
 	if err != nil {
-		return fmt.Errorf("Failed listing revisions: %s", err)
+		return fmt.Errorf("failed listing revisions: %s", err)
 	}
 
-	PrintRevisionList(PrintRevisionListArgs{
+	pargs := PrintRevisionListArgs{
 		Out:         args.Out,
 		Revisions:   revList.Revisions,
 		NameWidth:   int(args.NameWidth),
 		SkipHeader:  args.SkipHeader,
 		SizeInBytes: args.SizeInBytes,
-	})
+	}
 
-	return
+	if args.JsonOut {
+		if jb, err := json.Marshal(pargs.Revisions); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	}
+
+	PrintRevisionList(pargs)
+
+	return nil
 }
 
 type PrintRevisionListArgs struct {
@@ -45,11 +59,11 @@ func PrintRevisionList(args PrintRevisionListArgs) {
 	w.Init(args.Out, 0, 0, 3, ' ', 0)
 
 	if !args.SkipHeader {
-		fmt.Fprintln(w, "Id\tName\tSize\tModified\tKeepForever")
+		_, _ = fmt.Fprintln(w, "Id\tName\tSize\tModified\tKeepForever")
 	}
 
 	for _, rev := range args.Revisions {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			rev.Id,
 			truncateString(rev.OriginalFilename, args.NameWidth),
 			formatSize(rev.Size, args.SizeInBytes),
@@ -58,5 +72,5 @@ func PrintRevisionList(args PrintRevisionListArgs) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }

@@ -1,4 +1,4 @@
-#!/usr/local/bin/bash
+#!/usr/bin/env bash
 
 # Grab application version
 VERSION=$(_release/bin/gdrive-osx-x64 version | awk 'NR==1 {print $2}')
@@ -84,16 +84,16 @@ for name in ${filenames[@]}; do
     url=$(gdrive upload --share $bin_path | awk '/https/ {print $7}')
 
     # Shasum
-    sha="$(shasum -b $bin_path | awk '{print $1}')"
+    sha="$(shasum -b ${bin_path} | awk '{print $1}')"
 
     # Filename
-    name="$(basename $bin_path)"
+    name="$(basename ${bin_path})"
 
     # Render markdown row
     row=${ROW_TEMPLATE//"{{name}}"/$name}
-    row=${row//"{{url}}"/$url}
+    row=${row//"{{url}}"/${url}}
     row=${row//"{{description}}"/${descriptions[$name]}}
-    row=${row//"{{sha}}"/$sha}
+    row=${row//"{{sha}}"/${sha}}
 
     # Print row
     echo "$row"

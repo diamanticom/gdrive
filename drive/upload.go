@@ -1,14 +1,16 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"mime"
 	"os"
 	"path/filepath"
 	"time"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 type UploadArgs struct {
@@ -24,16 +26,17 @@ type UploadArgs struct {
 	Delete      bool
 	ChunkSize   int64
 	Timeout     time.Duration
+	JsonOut     bool
 }
 
-func (self *Drive) Upload(args UploadArgs) error {
+func (g *Drive) Upload(args UploadArgs) error {
 	if args.ChunkSize > intMax()-1 {
-		return fmt.Errorf("Chunk size is to big, max chunk size for this computer is %d", intMax()-1)
+		return fmt.Errorf("chunk size is to big, max chunk size for this computer is %d", intMax()-1)
 	}
 
 	// Ensure that none of the parents are sync dirs
 	for _, parent := range args.Parents {
-		isSyncDir, err := self.isSyncFile(parent)
+		isSyncDir, err := g.isSyncFile(parent)
 		if err != nil {
 			return err
 		}
@@ -44,62 +47,88 @@ func (self *Drive) Upload(args UploadArgs) error {
 	}
 
 	if args.Recursive {
-		return self.uploadRecursive(args)
+		return g.uploadRecursive(args)
 	}
 
 	info, err := os.Stat(args.Path)
 	if err != nil {
-		return fmt.Errorf("Failed stat file: %s", err)
+		return fmt.Errorf("failed stat file: %s", err)
 	}
 
 	if info.IsDir() {
 		return fmt.Errorf("'%s' is a directory, use --recursive to upload directories", info.Name())
 	}
 
-	f, rate, err := self.uploadFile(args)
+	f, rate, err := g.uploadFile(args)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(args.Out, "Uploaded %s at %s/s, total %s\n", f.Id, formatSize(rate, false), formatSize(f.Size, false))
+
+	out := make(map[string]string)
+	out["id"] = f.Id
+	out["rate"] = formatSize(rate, false)
+	out["size"] = formatSize(f.Size, false)
+
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Uploaded %s at %s/s, total %s\n",
+			f.Id, formatSize(rate, false), formatSize(f.Size, false))
+	}
 
 	if args.Share {
-		err = self.shareAnyoneReader(f.Id)
+		err = g.shareAnyoneReader(f.Id)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(args.Out, "File is readable by anyone at %s\n", f.WebContentLink)
+		out["webContentLink"] = f.WebContentLink
+
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "File is readable by anyone at %s\n", f.WebContentLink)
+		}
 	}
 
 	if args.Delete {
 		err = os.Remove(args.Path)
 		if err != nil {
-			return fmt.Errorf("Failed to delete file: %s", err)
+			return fmt.Errorf("failed to delete file: %s", err)
 		}
-		fmt.Fprintf(args.Out, "Removed %s\n", args.Path)
+
+		out["removed"] = args.Path
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "Removed %s\n", args.Path)
+		}
+	}
+
+	if args.JsonOut {
+		if jb, err := json.Marshal(out); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
 	}
 
 	return nil
 }
 
-func (self *Drive) uploadRecursive(args UploadArgs) error {
+func (g *Drive) uploadRecursive(args UploadArgs) error {
 	info, err := os.Stat(args.Path)
 	if err != nil {
-		return fmt.Errorf("Failed stat file: %s", err)
+		return fmt.Errorf("failed stat file: %s", err)
 	}
 
 	if info.IsDir() {
 		args.Name = ""
-		return self.uploadDirectory(args)
+		return g.uploadDirectory(args)
 	} else if info.Mode().IsRegular() {
-		_, _, err := self.uploadFile(args)
+		_, _, err := g.uploadFile(args)
 		return err
 	}
 
 	return nil
 }
 
-func (self *Drive) uploadDirectory(args UploadArgs) error {
+func (g *Drive) uploadDirectory(args UploadArgs) error {
 	srcFile, srcFileInfo, err := openFile(args.Path)
 	if err != nil {
 		return err
@@ -108,13 +137,17 @@ func (self *Drive) uploadDirectory(args UploadArgs) error {
 	// Close file on function exit
 	defer srcFile.Close()
 
-	fmt.Fprintf(args.Out, "Creating directory %s\n", srcFileInfo.Name())
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Creating directory %s\n", srcFileInfo.Name())
+	}
+
 	// Make directory on drive
-	f, err := self.mkdir(MkdirArgs{
+	f, err := g.mkdir(MkdirArgs{
 		Out:         args.Out,
 		Name:        srcFileInfo.Name(),
 		Parents:     args.Parents,
 		Description: args.Description,
+		JsonOut:     args.JsonOut,
 	})
 	if err != nil {
 		return err
@@ -123,7 +156,7 @@ func (self *Drive) uploadDirectory(args UploadArgs) error {
 	// Read files from directory
 	names, err := srcFile.Readdirnames(0)
 	if err != nil && err != io.EOF {
-		return fmt.Errorf("Failed reading directory: %s", err)
+		return fmt.Errorf("failed reading directory: %s", err)
 	}
 
 	for _, name := range names {
@@ -134,7 +167,7 @@ func (self *Drive) uploadDirectory(args UploadArgs) error {
 		newArgs.Description = ""
 
 		// Upload
-		err = self.uploadRecursive(newArgs)
+		err = g.uploadRecursive(newArgs)
 		if err != nil {
 			return err
 		}
@@ -143,7 +176,7 @@ func (self *Drive) uploadDirectory(args UploadArgs) error {
 	return nil
 }
 
-func (self *Drive) uploadFile(args UploadArgs) (*drive.File, int64, error) {
+func (g *Drive) uploadFile(args UploadArgs) (*drive.File, int64, error) {
 	srcFile, srcFileInfo, err := openFile(args.Path)
 	if err != nil {
 		return nil, 0, err
@@ -181,15 +214,17 @@ func (self *Drive) uploadFile(args UploadArgs) (*drive.File, int64, error) {
 	// Wrap reader in timeout reader
 	reader, ctx := getTimeoutReaderContext(progressReader, args.Timeout)
 
-	fmt.Fprintf(args.Out, "Uploading %s\n", args.Path)
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Uploading %s\n", args.Path)
+	}
 	started := time.Now()
 
-	f, err := self.service.Files.Create(dstFile).Fields("id", "name", "size", "md5Checksum", "webContentLink").Context(ctx).Media(reader, chunkSize).Do()
+	f, err := g.service.Files.Create(dstFile).Fields("id", "name", "size", "md5Checksum", "webContentLink").Context(ctx).Media(reader, chunkSize).Do()
 	if err != nil {
 		if isTimeoutError(err) {
-			return nil, 0, fmt.Errorf("Failed to upload file: timeout, no data was transferred for %v", args.Timeout)
+			return nil, 0, fmt.Errorf("failed to upload file: timeout, no data was transferred for %v", args.Timeout)
 		}
-		return nil, 0, fmt.Errorf("Failed to upload file: %s", err)
+		return nil, 0, fmt.Errorf("failed to upload file: %s", err)
 	}
 
 	// Calculate average upload rate
@@ -209,11 +244,12 @@ type UploadStreamArgs struct {
 	ChunkSize   int64
 	Progress    io.Writer
 	Timeout     time.Duration
+	JsonOut     bool
 }
 
-func (self *Drive) UploadStream(args UploadStreamArgs) error {
+func (g *Drive) UploadStream(args UploadStreamArgs) error {
 	if args.ChunkSize > intMax()-1 {
-		return fmt.Errorf("Chunk size is to big, max chunk size for this computer is %d", intMax()-1)
+		return fmt.Errorf("chunk size is to big, max chunk size for this computer is %d", intMax()-1)
 	}
 
 	// Instantiate empty drive file
@@ -236,28 +272,56 @@ func (self *Drive) UploadStream(args UploadStreamArgs) error {
 	// Wrap reader in timeout reader
 	reader, ctx := getTimeoutReaderContext(progressReader, args.Timeout)
 
-	fmt.Fprintf(args.Out, "Uploading %s\n", dstFile.Name)
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Uploading %s\n", dstFile.Name)
+	}
+
 	started := time.Now()
 
-	f, err := self.service.Files.Create(dstFile).Fields("id", "name", "size", "webContentLink").Context(ctx).Media(reader, chunkSize).Do()
+	out := make(map[string]string)
+
+	f, err := g.service.Files.Create(dstFile).
+		Fields("id", "name", "size", "webContentLink").
+		Context(ctx).Media(reader, chunkSize).Do()
 	if err != nil {
 		if isTimeoutError(err) {
-			return fmt.Errorf("Failed to upload file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to upload file: timeout, no data was transferred for %v", args.Timeout)
 		}
-		return fmt.Errorf("Failed to upload file: %s", err)
+		return fmt.Errorf("failed to upload file: %s", err)
 	}
 
 	// Calculate average upload rate
 	rate := calcRate(f.Size, started, time.Now())
 
-	fmt.Fprintf(args.Out, "Uploaded %s at %s/s, total %s\n", f.Id, formatSize(rate, false), formatSize(f.Size, false))
+	out["id"] = f.Id
+	out["rate"] = formatSize(rate, false)
+	out["size"] = formatSize(f.Size, false)
+
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Uploaded %s at %s/s, total %s\n",
+			f.Id, formatSize(rate, false), formatSize(f.Size, false))
+	}
 	if args.Share {
-		err = self.shareAnyoneReader(f.Id)
+		err = g.shareAnyoneReader(f.Id)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(args.Out, "File is readable by anyone at %s\n", f.WebContentLink)
+		out["webContentLink"] = f.WebContentLink
+
+		if !args.JsonOut {
+			_, _ = fmt.Fprintf(args.Out, "File is readable by anyone at %s\n", f.WebContentLink)
+		}
 	}
+
+	if args.JsonOut {
+		if jb, err := json.Marshal(out); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	}
+
 	return nil
 }

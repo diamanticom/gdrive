@@ -1,6 +1,7 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -22,16 +23,17 @@ type ExportArgs struct {
 	PrintMimes bool
 	Mime       string
 	Force      bool
+	JsonOut    bool
 }
 
-func (self *Drive) Export(args ExportArgs) error {
-	f, err := self.service.Files.Get(args.Id).Fields("name", "mimeType").Do()
+func (g *Drive) Export(args ExportArgs) error {
+	f, err := g.service.Files.Get(args.Id).Fields("name", "mimeType").Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get file: %s", err)
+		return fmt.Errorf("failed to get file: %s", err)
 	}
 
 	if args.PrintMimes {
-		return self.printMimes(args.Out, f.MimeType)
+		return g.printMimes(args, f.MimeType)
 	}
 
 	exportMime, err := getExportMime(args.Mime, f.MimeType)
@@ -41,9 +43,9 @@ func (self *Drive) Export(args ExportArgs) error {
 
 	filename := getExportFilename(f.Name, exportMime)
 
-	res, err := self.service.Files.Export(args.Id, exportMime).Download()
+	res, err := g.service.Files.Export(args.Id, exportMime).Download()
 	if err != nil {
-		return fmt.Errorf("Failed to download file: %s", err)
+		return fmt.Errorf("failed to download file: %s", err)
 	}
 
 	// Close body on function exit
@@ -51,13 +53,13 @@ func (self *Drive) Export(args ExportArgs) error {
 
 	// Check if file exists
 	if !args.Force && fileExists(filename) {
-		return fmt.Errorf("File '%s' already exists, use --force to overwrite", filename)
+		return fmt.Errorf("file '%s' already exists, use --force to overwrite", filename)
 	}
 
 	// Create new file
 	outFile, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("Unable to create new file '%s': %s", filename, err)
+		return fmt.Errorf("unable to create new file '%s': %s", filename, err)
 	}
 
 	// Close file on function exit
@@ -66,25 +68,49 @@ func (self *Drive) Export(args ExportArgs) error {
 	// Save file to disk
 	_, err = io.Copy(outFile, res.Body)
 	if err != nil {
-		return fmt.Errorf("Failed saving file: %s", err)
+		return fmt.Errorf("failed saving file: %s", err)
 	}
 
-	fmt.Fprintf(args.Out, "Exported '%s' with mime type: '%s'\n", filename, exportMime)
+	if args.JsonOut {
+		if jb, err := json.Marshal(map[string]string{
+			"exported": filename,
+			"mimeType": exportMime,
+		}); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	} else {
+		_, _ = fmt.Fprintf(args.Out, "Exported '%s' with mime type: '%s'\n", filename, exportMime)
+	}
+
 	return nil
 }
 
-func (self *Drive) printMimes(out io.Writer, mimeType string) error {
-	about, err := self.service.About.Get().Fields("exportFormats").Do()
+func (g *Drive) printMimes(args ExportArgs, mimeType string) error {
+	about, err := g.service.About.Get().Fields("exportFormats").Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get about: %s", err)
+		return fmt.Errorf("failed to get about: %s", err)
 	}
 
 	mimes, ok := about.ExportFormats[mimeType]
 	if !ok {
-		return fmt.Errorf("File with type '%s' cannot be exported", mimeType)
+		return fmt.Errorf("file with type '%s' cannot be exported", mimeType)
 	}
 
-	fmt.Fprintf(out, "Available mime types: %s\n", formatList(mimes))
+	if args.JsonOut {
+		if jb, err := json.Marshal(map[string][]string{
+			"mimeTypes": mimes,
+		}); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	} else {
+		_, _ = fmt.Fprintf(args.Out, "Available mime types: %s\n", formatList(mimes))
+	}
 	return nil
 }
 
@@ -95,7 +121,7 @@ func getExportMime(userMime, fileMime string) (string, error) {
 
 	defaultMime, ok := DefaultExportMime[fileMime]
 	if !ok {
-		return "", fmt.Errorf("File with type '%s' does not have a default export mime, and can probably not be exported", fileMime)
+		return "", fmt.Errorf("file with type '%s' does not have a default export mime, and can probably not be exported", fileMime)
 	}
 
 	return defaultMime, nil

@@ -1,28 +1,35 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"sort"
 	"text/tabwriter"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 type ListSyncArgs struct {
 	Out        io.Writer
 	SkipHeader bool
+	JsonOut    bool
 }
 
-func (self *Drive) ListSync(args ListSyncArgs) error {
+func (g *Drive) ListSync(args ListSyncArgs) error {
 	listArgs := listAllFilesArgs{
 		query:  "appProperties has {key='syncRoot' and value='true'}",
 		fields: []googleapi.Field{"nextPageToken", "files(id,name,mimeType,createdTime)"},
 	}
-	files, err := self.listAllFiles(listArgs)
+	files, err := g.listAllFiles(listArgs)
 	if err != nil {
 		return err
 	}
+	if args.JsonOut {
+		return printSyncDirectoriesJson(files, args)
+	}
+
 	printSyncDirectories(files, args)
 	return nil
 }
@@ -34,20 +41,35 @@ type ListRecursiveSyncArgs struct {
 	PathWidth   int64
 	SizeInBytes bool
 	SortOrder   string
+	JsonOut     bool
 }
 
-func (self *Drive) ListRecursiveSync(args ListRecursiveSyncArgs) error {
-	rootDir, err := self.getSyncRoot(args.RootId)
+func (g *Drive) ListRecursiveSync(args ListRecursiveSyncArgs) error {
+	rootDir, err := g.getSyncRoot(args.RootId)
 	if err != nil {
 		return err
 	}
 
-	files, err := self.prepareRemoteFiles(rootDir, args.SortOrder)
+	files, err := g.prepareRemoteFiles(rootDir, args.SortOrder)
 	if err != nil {
 		return err
+	}
+
+	if args.JsonOut {
+		return printSyncDirContentJson(files, args)
 	}
 
 	printSyncDirContent(files, args)
+	return nil
+}
+
+func printSyncDirectoriesJson(files []*drive.File, args ListSyncArgs) error {
+	jb, err := json.Marshal(files)
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintln(args.Out, string(jb))
 	return nil
 }
 
@@ -56,18 +78,28 @@ func printSyncDirectories(files []*drive.File, args ListSyncArgs) {
 	w.Init(args.Out, 0, 0, 3, ' ', 0)
 
 	if !args.SkipHeader {
-		fmt.Fprintln(w, "Id\tName\tCreated")
+		_, _ = fmt.Fprintln(w, "Id\tName\tCreated")
 	}
 
 	for _, f := range files {
-		fmt.Fprintf(w, "%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n",
 			f.Id,
 			f.Name,
 			formatDatetime(f.CreatedTime),
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
+}
+
+func printSyncDirContentJson(files []*RemoteFile, args ListRecursiveSyncArgs) error {
+	jb, err := json.Marshal(files)
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintln(args.Out, string(jb))
+	return nil
 }
 
 func printSyncDirContent(files []*RemoteFile, args ListRecursiveSyncArgs) {
@@ -80,11 +112,11 @@ func printSyncDirContent(files []*RemoteFile, args ListRecursiveSyncArgs) {
 	w.Init(args.Out, 0, 0, 3, ' ', 0)
 
 	if !args.SkipHeader {
-		fmt.Fprintln(w, "Id\tPath\tType\tSize\tModified")
+		_, _ = fmt.Fprintln(w, "Id\tPath\tType\tSize\tModified")
 	}
 
 	for _, rf := range files {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			rf.file.Id,
 			truncateString(rf.relPath, int(args.PathWidth)),
 			filetype(rf.file),
@@ -93,5 +125,5 @@ func printSyncDirContent(files []*RemoteFile, args ListRecursiveSyncArgs) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }

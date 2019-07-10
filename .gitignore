@@ -8,3 +8,7 @@ Session.vim
 .netrwhist
 gdrive
 gdrive.sh
+
+# ide
+.idea
+.vscode

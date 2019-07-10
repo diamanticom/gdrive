@@ -1,13 +1,15 @@
 package drive
 
 import (
+	"encoding/json"
 	"fmt"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"io"
 	"mime"
 	"path/filepath"
 	"time"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 type UpdateArgs struct {
@@ -22,12 +24,13 @@ type UpdateArgs struct {
 	Recursive   bool
 	ChunkSize   int64
 	Timeout     time.Duration
+	JsonOut     bool
 }
 
-func (self *Drive) Update(args UpdateArgs) error {
+func (g *Drive) Update(args UpdateArgs) error {
 	srcFile, srcFileInfo, err := openFile(args.Path)
 	if err != nil {
-		return fmt.Errorf("Failed to open file: %s", err)
+		return fmt.Errorf("failed to open file: %s", err)
 	}
 
 	defer srcFile.Close()
@@ -61,20 +64,36 @@ func (self *Drive) Update(args UpdateArgs) error {
 	// Wrap reader in timeout reader
 	reader, ctx := getTimeoutReaderContext(progressReader, args.Timeout)
 
-	fmt.Fprintf(args.Out, "Uploading %s\n", args.Path)
+	if !args.JsonOut {
+		_, _ = fmt.Fprintf(args.Out, "Uploading %s\n", args.Path)
+	}
 	started := time.Now()
 
-	f, err := self.service.Files.Update(args.Id, dstFile).Fields("id", "name", "size").Context(ctx).Media(reader, chunkSize).Do()
+	f, err := g.service.Files.Update(args.Id, dstFile).Fields("id", "name", "size").Context(ctx).Media(reader, chunkSize).Do()
 	if err != nil {
 		if isTimeoutError(err) {
-			return fmt.Errorf("Failed to upload file: timeout, no data was transferred for %v", args.Timeout)
+			return fmt.Errorf("failed to upload file: timeout, no data was transferred for %v", args.Timeout)
 		}
-		return fmt.Errorf("Failed to upload file: %s", err)
+		return fmt.Errorf("failed to upload file: %s", err)
 	}
 
 	// Calculate average upload rate
 	rate := calcRate(f.Size, started, time.Now())
 
-	fmt.Fprintf(args.Out, "Updated %s at %s/s, total %s\n", f.Id, formatSize(rate, false), formatSize(f.Size, false))
+	if args.JsonOut {
+		if jb, err := json.Marshal(map[string]string{
+			"id":   f.Id,
+			"rate": formatSize(rate, false),
+			"size": formatSize(f.Size, false),
+		}); err != nil {
+			return err
+		} else {
+			_, _ = fmt.Fprintln(args.Out, string(jb))
+			return nil
+		}
+	}
+
+	_, _ = fmt.Fprintf(args.Out, "Updated %s at %s/s, total %s\n",
+		f.Id, formatSize(rate, false), formatSize(f.Size, false))
 	return nil
 }
