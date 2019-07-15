@@ -286,6 +286,18 @@ func mkdirHandler(ctx cli.Context) {
 	utils.CheckErr(err)
 }
 
+func mkdirpHandler(ctx cli.Context) {
+	args := ctx.Args()
+	err := utils.NewDrive(args).Mkdirp(drive.MkdirArgs{
+		Out:         os.Stdout,
+		Name:        args.String("name"),
+		Description: args.String("description"),
+		Parents:     args.StringSlice("parent"),
+		JsonOut:     args.Bool("jsonOut"),
+	})
+	utils.CheckErr(err)
+}
+
 func shareHandler(ctx cli.Context) {
 	args := ctx.Args()
 	err := utils.NewDrive(args).Share(drive.ShareArgs{

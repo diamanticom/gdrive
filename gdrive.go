@@ -409,6 +409,26 @@ func main() {
 			},
 		},
 		{
+			Pattern:     "[global] mkdirp [options] <name>",
+			Description: "Create directories if not exist",
+			Callback:    mkdirpHandler,
+			FlagGroups: cli.FlagGroups{
+				cli.NewFlagGroup("global", globalFlags...),
+				cli.NewFlagGroup("options",
+					cli.StringSliceFlag{
+						Name:        "parent",
+						Patterns:    []string{"-p", "--parent"},
+						Description: "Parent id of created directory, can be specified multiple times to give many parents",
+					},
+					cli.StringFlag{
+						Name:        "description",
+						Patterns:    []string{"--description"},
+						Description: "Directory description",
+					},
+				),
+			},
+		},
+		{
 			Pattern:     "[global] share [options] <fileId>",
 			Description: "Share file or directory",
 			Callback:    shareHandler,
