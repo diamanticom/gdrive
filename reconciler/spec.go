@@ -27,7 +27,7 @@ Loop:
 			}
 
 			if ok {
-				_, _ = fmt.Printf("%2d/%2d: reconciled:%s in %v\n",
+				_, _ = fmt.Printf("%2d/%2d: reconciled: %30s [%v]\n",
 					i+1, len(s.Files), file.Name, time.Since(now))
 				continue Loop
 			}
@@ -46,7 +46,7 @@ Loop:
 			return err
 		}
 
-		_, _ = fmt.Printf("%2d/%2d: reconciled:%s in %v\n", i+1, len(s.Files), file.Name, time.Since(now))
+		_, _ = fmt.Printf("%2d/%2d: reconciled: %30s [%v]\n", i+1, len(s.Files), file.Name, time.Since(now))
 	}
 	return nil
 }
