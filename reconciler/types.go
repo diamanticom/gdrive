@@ -12,6 +12,8 @@ type Spec struct {
 	ApiVersion string
 	// Policy is the reconciliation policy
 	Policy *Policy
+	// Cache stores files locally for easier retrieval later
+	Cache *Cache
 	// Files is a list of files to reconcile
 	Files []*File
 	// g is client to gdrive
@@ -30,6 +32,8 @@ type File struct {
 	Md5 string
 	// remoteName is the name of the file on gdrive
 	remoteName string
+	// cachedPath is the location of local cache
+	cachedPath string
 	// g is client to gdrive
 	g *drive.Drive
 }
@@ -38,4 +42,9 @@ type File struct {
 type Policy struct {
 	// IgnoreMd5 ignores md5 sum
 	IgnoreMd5 bool
+}
+
+// Cache is local cache store
+type Cache struct {
+	Path string
 }

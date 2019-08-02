@@ -17,6 +17,16 @@ import (
 func (s *Spec) Reconcile() error {
 Loop:
 	for i, file := range s.Files {
+		if i == 0 {
+			fmt.Println("legend: [<-c: from cache], [<-r: from remote]")
+			if s.Cache != nil && len(s.Cache.Path) > 0 {
+				fmt.Println("using cache folder:", s.Cache.Path)
+			}
+		}
+		if s.Cache != nil && len(s.Cache.Path) > 0 {
+			file.cachedPath = filepath.Join(s.Cache.Path, file.Id)
+		}
+
 		now := time.Now()
 		file.g = s.g
 
@@ -27,7 +37,23 @@ Loop:
 			}
 
 			if ok {
-				_, _ = fmt.Printf("%2d/%2d: reconciled: %30s [%v]\n",
+				_, _ = fmt.Printf("%2d/%2d: reconciled: %30s     [%v]\n",
+					i+1, len(s.Files), file.Name, time.Since(now))
+				continue Loop
+			}
+		}
+
+		if file.existsCache() {
+			ok, err := file.verifyMd5Cached()
+			if err != nil {
+				return err
+			}
+
+			if ok {
+				if err := file.copyFromCache(); err != nil {
+					return err
+				}
+				_, _ = fmt.Printf("%2d/%2d: reconciled: %30s <-c [%v]\n",
 					i+1, len(s.Files), file.Name, time.Since(now))
 				continue Loop
 			}
@@ -46,7 +72,8 @@ Loop:
 			return err
 		}
 
-		_, _ = fmt.Printf("%2d/%2d: reconciled: %30s [%v]\n", i+1, len(s.Files), file.Name, time.Since(now))
+		_, _ = fmt.Printf("%2d/%2d: reconciled: %30s <-r [%v]\n",
+			i+1, len(s.Files), file.Name, time.Since(now))
 	}
 	return nil
 }
@@ -104,6 +131,9 @@ func (s *Spec) Generate() error {
 	s.Files = make([]*File, 0, len(l.Items))
 	s.Kind = SpecKind
 	s.ApiVersion = SpecApiVersionV1Beta1
+
+	s.Cache = new(Cache)
+	s.Cache.Path = StandardCache
 
 Loop:
 	for _, item := range l.Items {

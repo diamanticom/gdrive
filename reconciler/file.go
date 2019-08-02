@@ -24,8 +24,28 @@ func (f *File) existsLocal() bool {
 	return !info.IsDir()
 }
 
+func (f *File) existsCache() bool {
+	info, err := os.Stat(filepath.Join(f.cachedPath, f.Name))
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
+
 func (f *File) verifyMd5Local() (bool, error) {
 	b, err := ioutil.ReadFile(filepath.Join(f.LocalPath, f.Name))
+	if err != nil {
+		return false, err
+	}
+
+	md5Sum := md5.Sum(b)
+	s := hex.EncodeToString(md5Sum[:])
+
+	return s == f.Md5, nil
+}
+
+func (f *File) verifyMd5Cached() (bool, error) {
+	b, err := ioutil.ReadFile(filepath.Join(f.cachedPath, f.Name))
 	if err != nil {
 		return false, err
 	}
@@ -62,6 +82,34 @@ func (f *File) verifyMd5Remote() (bool, error) {
 	f.remoteName = out["name"]
 
 	return out["md5Checksum"] == f.Md5, nil
+}
+
+func (f *File) copyFromCache() error {
+	if f.Name == "" {
+		return fmt.Errorf("name cannot be empty, please check spec")
+	}
+
+	if f.g == nil {
+		return fmt.Errorf("remote driver is invalid and not initialized")
+	}
+
+	// check if local path exists, if not create one
+	if _, err := os.Stat(f.LocalPath); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+
+		if err := os.MkdirAll(f.LocalPath, 0755); err != nil {
+			return err
+		}
+	}
+
+	b, err := ioutil.ReadFile(filepath.Join(f.cachedPath, f.Name))
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(filepath.Join(f.LocalPath, f.Name), b, 0755)
 }
 
 func (f *File) download() error {
@@ -146,5 +194,25 @@ func (f *File) download() error {
 		return err
 	}
 
-	return ioutil.WriteFile(filepath.Join(f.LocalPath, f.Name), b, 0755)
+	if err := ioutil.WriteFile(filepath.Join(f.LocalPath, f.Name), b, 0755); err != nil {
+		return err
+	}
+
+	// now check if cached path is enabled and if so, write file there as well
+	if len(f.cachedPath) == 0 {
+		return nil
+	}
+
+	// check if local path exists, if not create one
+	if _, err := os.Stat(f.cachedPath); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+
+		if err := os.MkdirAll(f.cachedPath, 0755); err != nil {
+			return err
+		}
+	}
+
+	return ioutil.WriteFile(filepath.Join(f.cachedPath, f.Name), b, 0755)
 }
