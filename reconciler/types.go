@@ -28,6 +28,8 @@ type File struct {
 	LocalPath string
 	// Id of file in gdrive
 	Id string
+	// RevId is revision ID of file
+	RevId string
 	// Md5 checksum of file used to reconcile states
 	Md5 string
 	// remoteName is the name of the file on gdrive

@@ -140,22 +140,40 @@ func (f *File) download() error {
 	bb := new(bytes.Buffer)
 	bw := bufio.NewWriter(bb)
 
-	args := drive.DownloadArgs{
-		Out:       bw,
-		Progress:  os.Stderr,
-		Id:        f.Id,
-		Path:      tmpFolder,
-		Force:     true,
-		Skip:      false,
-		Recursive: false,
-		Delete:    false,
-		Stdout:    false,
-		Timeout:   time.Second * 120,
-		JsonOut:   true,
-	}
+	if len(f.RevId) == 0 {
+		args := drive.DownloadArgs{
+			Out:       bw,
+			Progress:  os.Stderr,
+			Id:        f.Id,
+			Path:      tmpFolder,
+			Force:     true,
+			Skip:      false,
+			Recursive: false,
+			Delete:    false,
+			Stdout:    false,
+			Timeout:   time.Second * 120,
+			JsonOut:   true,
+		}
 
-	if err := f.g.Download(args); err != nil {
-		return err
+		if err := f.g.Download(args); err != nil {
+			return err
+		}
+	} else {
+		args := drive.DownloadRevisionArgs{
+			Out:        bw,
+			Progress:   os.Stderr,
+			FileId:     f.Id,
+			RevisionId: f.RevId,
+			Path:       tmpFolder,
+			Force:      true,
+			Stdout:     false,
+			Timeout:    time.Second * 120,
+			JsonOut:    true,
+		}
+
+		if err := f.g.DownloadRevision(args); err != nil {
+			return err
+		}
 	}
 
 	_ = bw.Flush()

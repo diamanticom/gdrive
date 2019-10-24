@@ -29,13 +29,14 @@ func New(fileName string, g *drive.Drive) (Reconciler, error) {
 	}
 
 	switch v := k.ApiVersion; v {
-	case SpecApiVersionV1Beta1:
+	case SpecApiVersionV1Beta1, SpecApiVersionV1Beta2:
 	default:
-		return nil, fmt.Errorf("spec api version is not valid. expected:%s", SpecApiVersionV1Beta1)
+		return nil, fmt.Errorf("spec api version is not valid. expected:%s or %s",
+			SpecApiVersionV1Beta1, SpecApiVersionV1Beta2)
 	}
 
 	switch v := k.ApiVersion; v {
-	case SpecApiVersionV1Beta1:
+	case SpecApiVersionV1Beta1, SpecApiVersionV1Beta2:
 		spec := new(Spec)
 		if err := yaml.Unmarshal(b, spec); err != nil {
 			return nil, err

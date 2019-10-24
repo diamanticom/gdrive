@@ -11,6 +11,7 @@ import (
 
 	"github.com/gdrive-org/gdrive/drive"
 	"github.com/gdrive-org/gdrive/utils"
+	gdrive "google.golang.org/api/drive/v3"
 	"gopkg.in/yaml.v2"
 )
 
@@ -24,7 +25,7 @@ Loop:
 			}
 		}
 		if s.Cache != nil && len(s.Cache.Path) > 0 {
-			file.cachedPath = filepath.Join(s.Cache.Path, file.Id)
+			file.cachedPath = filepath.Join(s.Cache.Path, file.Id, file.RevId)
 		}
 
 		now := time.Now()
@@ -130,7 +131,7 @@ func (s *Spec) Generate() error {
 
 	s.Files = make([]*File, 0, len(l.Items))
 	s.Kind = SpecKind
-	s.ApiVersion = SpecApiVersionV1Beta1
+	s.ApiVersion = SpecApiVersionV1Beta2
 
 	s.Cache = new(Cache)
 	s.Cache.Path = StandardCache
@@ -147,8 +148,41 @@ Loop:
 			continue Loop
 		}
 
+		bb := new(bytes.Buffer)
+		bw := bufio.NewWriter(bb)
+
+		args := drive.ListRevisionsArgs{
+			Out:         bw,
+			Id:          item.ID,
+			NameWidth:   0,
+			SkipHeader:  false,
+			SizeInBytes: false,
+			JsonOut:     true,
+		}
+
+		if err := s.g.ListRevisions(args); err != nil {
+			return err
+		}
+
+		_ = bw.Flush()
+
+		var revisions []*gdrive.Revision
+		if err := json.Unmarshal(bb.Bytes(), &revisions); err != nil {
+			return err
+		}
+
+		// loop through revision list and pick the revision for which md5 matches
+		var revId string
+		for _, revision := range revisions {
+			if revision.Md5Checksum == item.Md5Checksum {
+				revId = revision.Id
+				break
+			}
+		}
+
 		file := new(File)
 		file.Id = item.ID
+		file.RevId = revId
 		file.Md5 = item.Md5Checksum
 		file.LocalPath, file.Name = filepath.Split(item.Name)
 
