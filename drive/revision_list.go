@@ -19,7 +19,8 @@ type ListRevisionsArgs struct {
 }
 
 func (g *Drive) ListRevisions(args ListRevisionsArgs) error {
-	revList, err := g.service.Revisions.List(args.Id).Fields("revisions(id,keepForever,size,modifiedTime,originalFilename)").Do()
+	revList, err := g.service.Revisions.List(args.Id).
+		Fields("revisions(id,keepForever,size,modifiedTime,originalFilename,md5Checksum)").Do()
 	if err != nil {
 		return fmt.Errorf("failed listing revisions: %s", err)
 	}
